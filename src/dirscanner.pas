@@ -67,6 +67,7 @@ type
 							PROTECTED
 							fileliste:	TFileList;
 							unfiles	:	TStringList;
+							suspendFile:string;
 							pattern	:	{$IFDEF LINUX} string {$ELSE}	TRegExpr {$ENDIF};
 							maxR		:	integer;
 
@@ -80,6 +81,7 @@ type
 							property		SearchRec[i:integer]:TSearchRec read GetSearchRec; DEFAULT;
 							property		Strings[i:integer]:string read GetString;
 							property		Count:integer read GetCount;
+							property		LockFile:string read suspendFile write suspendFile;
 						end;
 						
 						
@@ -147,12 +149,10 @@ begin
 	fileliste:=TFilelist.Create;
 	unfiles:=TStringlist.Create;
 	unfiles.Sorted:=true; unfiles.Duplicates:=dupIgnore;
-	if (unfileName<>'') and FileExists(unfileName) then 
-	begin
+	if (unfileName<>'') and FileExists(unfileName) then begin
 		unfiles.LoadFromFile(unfileName);
-		for i:=0 to unfiles.Count-1 do
-			if (pos('REGEX=',unfiles[i])=1) or (pos('REGEX_',unfiles[i])=1) then
-			begin
+		for i:=0 to unfiles.Count-1 do 
+			if (pos('REGEX=',unfiles[i])=1) or (pos('REGEX_',unfiles[i])=1) then begin
 				unfiles.objects[i]:=TRegExpr.Create;
 				TRegExpr(unfiles.objects[i]).Expression:=copy(unfiles[i],7,256);
 			end;
@@ -176,13 +176,11 @@ var
    i	:	integer;
 begin
 	result:=false;
-	for i:=0 to unfiles.Count-1 do
-	begin
-		if unfiles.objects[i]=NIL then
-		begin
+	for i:=0 to unfiles.Count-1 do begin
+		if unfiles.objects[i]=NIL then begin
 			if pos(unfiles[i],s)>0 then EXIT
-		end else
-			if TRegExpr(unfiles.objects[i]).Exec(s) then EXIT
+		end else if TRegExpr(unfiles.objects[i]).Exec(s) then 
+			EXIT
 	end;
 	result:=true;
 end;
@@ -200,29 +198,25 @@ var
 	fliste	:	TStringList;
 	year,month,
 	day,x		:	word;
+	
 begin
 	gNode:=NIL;
 	gNode:=Glob(path+'/*'); 
 	if gNode=NIL then EXIT;
 	fliste:=TStringList.Create; 
 	g:=gNode;
-	while g<>NIL do
-	begin // es kann nur ein "GLOB" existieren => fliste als Zwischenspeicher
+	while g<>NIL do begin // es kann nur ein "GLOB" existieren => fliste als Zwischenspeicher
 		fliste.Add(strPas(g^.name));
 		g:=g^.next;	
 	end;
 	GlobFree(gNode);
-  	for e:=0 to fliste.Count-1 do
-  	begin
+  	for e:=0 to fliste.Count-1 do begin
 		shortname:=fliste[e]; name:=path+'/'+shortname;
-		if (shortname<>'.') and (shortname<>'..') and NameOK(name) then
-	  	begin
+		if (shortname<>'.') and (shortname<>'..') and NameOK(name) then begin
 			fpStat(name,info);
-      	if fpS_ISDIR(info.mode) then
-			begin
-	    		if (r<maxR) then Travel(name,r+1)
-       	end else if fnmatch(pattern,shortname) then
-			begin
+      	if fpS_ISDIR(info.mode) then begin
+	    		if (r<maxR) and ((suspendFile='') or (not FileExists(name+'/'+suspendFile))) then Travel(name,r+1)
+       	end else if fnmatch(pattern,shortname) then begin
 				srec.name:=name;
 				srec.attr:=info.mode;
 				EpochToLocal(info.mtime,year,month,day,x,x,x);
@@ -236,16 +230,12 @@ begin
 {$ELSE}
 begin
 	e:=FindFirst(path+'/*',255,srec);
-  	while e=0 do
-  	begin
+  	while e=0 do begin
 		shortname:=srec.name; name:=path+'/'+shortname; 
-		if (srec.name[1]<>'.') and (NameOK(name)) then
-	  	begin
-      	if srec.attr and faDirectory<>0 then
-			begin
-	    		if r<maxR then Travel(name,r+1)
-       	end else if pattern.Exec(srec.name) then
-			begin
+		if (srec.name[1]<>'.') and (NameOK(name)) then begin
+      	if srec.attr and faDirectory<>0 then begin
+	    		if (r<maxR) and ((suspendFile='') or (not FileExists(name+'/'+suspendFile))) then Travel(name,r+1)
+       	end else if pattern.Exec(srec.name) then begin
 				srec.name:=name;
 			 	fileliste.AddSearchRec(shortname,srec);
 			end;

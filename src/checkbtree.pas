@@ -18,7 +18,7 @@ program CheckBTree;
 
 
 uses
-   Classes,SysUtils,BtreeFlex;
+   Classes,SysUtils,IdList,BtreeFlex;
 
 type
 	TPrg	=	class
@@ -32,7 +32,7 @@ type
 					words,
 					allwords	:	cardinal;
 					
-					procedure Count(var akt:Tval);
+					procedure Count(const akt:Tval);
 				
 				PUBLIC
 					property 	Worte:cardinal read words; 
@@ -70,7 +70,7 @@ begin
 end;
 
 	
-procedure TPrg.Count(var akt:Tval);
+procedure TPrg.Count(const akt:Tval);
 begin
 	if (akt.z>=loLimit) or (akt.s=paramstr(2)) then writeln(akt.z:12,akt.s:20);
 	inc(words);

@@ -159,6 +159,10 @@ Maximum of 50 hits will be shown. Default is 100.</li>
 Sorting order is "by time" instead of "by weight".</li>
 <li><tt>-q database  "Barney NEAR Flintstone*" . . . . . 1</tt><br>
 Both Barney and Flintstones has to be flagged with info bit-value 1 (ie. must be headline words). In a -q query, a bFilter value of Zero means "undefined" and matches all stored values.</li>
+<li><tt>-q database  "Barney NEAR /stone/" . . . . . 1</tt><br>
+Similar to the above query, but using a regular expression.</li>
+<li><tt>-q database:database2 "Bill"</tt><br>
+finds all files/records with "Bill" in the database named "database2" which has no own config file, using "database.config" (a so called "clone config")</li>
 </ul>
 </dd>
 <br>

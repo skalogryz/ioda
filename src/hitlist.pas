@@ -59,6 +59,7 @@ type
 	THitList = class
 				constructor	Create(const maxhits: integer);
 				destructor	Destroy; OVERRIDE;
+				procedure 	Clear;
 				procedure	AddWithoutFileRef(id, date, weight, info: cardinal);
 				procedure	AddWithFileRef(fileref, title : string; id, date, weight, info: cardinal);
 				procedure	AddDuplicates(dups: TDupSortList);
@@ -84,6 +85,7 @@ IMPLEMENTATION
  *  Storage class for Joda Hits (i.e. result of a fulltext search)
  *
  *)
+ 
 constructor THitList.Create(const maxhits : integer);
 begin
 	inherited Create;
@@ -92,10 +94,21 @@ begin
 	SetLength(hitarr, max);
 end;
 
+
 destructor THitList.Destroy;
 begin
+	SetLength(hitarr,0);
 	inherited Destroy;
 end;
+
+
+procedure THitList.Clear;
+begin
+	count := 0;
+	SetLength(hitarr,0);
+	SetLength(hitarr,max);
+end;
+
 
 procedure THitList.AddWithoutFileRef(id, date, weight, info: cardinal);
 begin

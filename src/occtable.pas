@@ -83,7 +83,7 @@ type
 		constructor Create(const name:string; elSize:longint; readOnly,enableRecycling:boolean; var res:integer);
 		destructor  Destroy; OVERRIDE;
 		function    InsertRecord(var key:cardinal; size,elID,elPos,elDate,elInfo:cardinal):integer; VIRTUAL; ABSTRACT;
-		function    GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean):longint; VIRTUAL; ABSTRACT;
+		function    GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean; var res:integer):TDWList; VIRTUAL; ABSTRACT;
 		function 	GetItemCount(key:cardinal):longint; VIRTUAL;
 		function 	InvalidateRecord(key,fid:cardinal):longint; VIRTUAL; ABSTRACT;
 		procedure   Commit; VIRTUAL; 
@@ -117,16 +117,16 @@ type
 //		procedure 	CallbackNOP(elID,elPos,elDat,elWeight,elInf:cardinal); // Beispiel eines Callbacks
 		
 		PUBLIC
-		property		Results[i:integer]:TDW read GetResult; DEFAULT;
-		//				^^ wenn "caller" der letzten GetItemlist-Operation NIL war
+		property		Results[i:integer]:TDW read GetResult; DEFAULT; // wenn "caller" der letzten GetItemlist-Operation NIL war
 		property		Count:integer read GetCount;
+		property		ResultList:TDWList read resList;
 	end;
 
 	TClusterMasterD	=	class(TClusterMaster)
 		constructor Create(const name:string; elSize:longint; readOnly,enableRecycling:boolean; var res:integer);
 		destructor  Destroy; OVERRIDE;
 		function    InsertRecord(var key:cardinal; size,elID,elPos,elDate,elInfo:cardinal):integer; OVERRIDE;
-		function    GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean):longint; OVERRIDE;
+		function    GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean; var res:integer):TDWList; OVERRIDE;
 		function 	InvalidateRecord(key,fid:cardinal):longint; OVERRIDE;
 		
 		PROTECTED
@@ -295,11 +295,7 @@ end;
 
 function TClusterMaster.GetCount:integer;
 begin
-	if resList=NIL then begin
-		fillDWord(result,sizeOf(TDW) shr 2,0);
-		result:=0;
-	end else
-		result:=resList.Count;
+	if resList=NIL then result:=0 else result:=resList.Count;
 end;
 
 
@@ -362,9 +358,12 @@ end;
 
 
 function TClusterMaster.GetItemCount(key:cardinal):longint;
+var
+	c	:	longint;
 begin
 	resList.Free; resList:=NIL;
-	result:=GetItemList(key,NIL,true);
+	GetItemList(key,NIL,true,c);
+	result:=c;
 end;
 
 
@@ -601,7 +600,7 @@ begin
 end;
 
 
-function TClusterMasterD.GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean):longint;
+function TClusterMasterD.GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean; var res:integer):TDWList;
 var
 	p												:	PByte;
 	i,id,r,aktKey,firstKey,datum,info	:	cardinal;
@@ -617,27 +616,28 @@ begin
 		end else begin
 			if resList=NIL then resList:=TDWList.Create(maxlongint) else resList.Clear;
 		end;
-
+		result:=resList;
+		
 		while key>0 do begin
 			aktKey:=key;
 			occStream.Seek(key,soFromBeginning);
 			if key=firstKey then with firstocc^ do begin
 				l:=occStream.Read(firstOcc^,8+def1stReadLen);
 				if l=0 then begin
-					result:=-315; EXIT
+					res:=-315; EXIT
 				end;
 				key:=next;
 				p:=@occs;
 			end else with occ^ do begin
 				l:=occStream.Read(occ^,4+def1stReadLen);
 				if l=0 then begin
-					result:=-315; EXIT
+					res:=-315; EXIT
 				end;
 				key:=next;
 				p:=@occs;
 			end;
-			if (key=aktKey) then begin
-				result:=-316; EXIT
+			if key=aktKey then begin
+				res:=-316; EXIT
 			end;
 
 			i:=0; last:=false; r:=def1stReadLen;
@@ -651,17 +651,17 @@ begin
 	//writeln(' => ',id:10,i:10,last:10,aktKey:10,key:10);					
 					until (last) or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
 					if i>fullClusterLen then begin
-						result:=-314; EXIT;				// normales Abbruchkriterium nicht gefunden: Liste inkonsistent!
+						res:=-314; EXIT;			// normales Abbruchkriterium nicht gefunden: Liste inkonsistent!
 					end;
 				end else 
-					BREAK										// len flag ist - wie last flag - ein Abbruchkriterium
+					BREAK								// len flag ist - wie last flag - ein Abbruchkriterium
 			end;
 		end;
 	except
-		on EStreamError do result:=-304;
+		on EStreamError do res:=-304;
 	end;
 	if resList<>NIL then resList.Sort;
-	result:=n;
+	res:=n;
 end;
 
 

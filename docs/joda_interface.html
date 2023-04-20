@@ -127,8 +127,19 @@ to skip old entries while merging. Only available for bigger formats if the occu
 </ul>
 
 <p>Merge can be used for the optimization of a database. For this purpose, it is sufficient, to create a copy (or softlink) of the source database config file as target config file. Now merge the existing database into the new (empty) one. The result is a perfect optimized copy of the source database, because now all equal words are (internally) pooled in one cluster. This will minimize disk seeks, therefore improves retrieving speed and saves disk space. Strongly recommended at least for for completed databases (like archives).</p>
+</dd>
+
+<dt>Optimize a database:</dt>
+<dd><span class="zue">joda -opt [-wordcheck] [-filecheck] [-verbose] database [minimalDate]</span>
+<p class="i example">Example:</p>
+<ul class="none">
+<li><tt>joda -opt -verbose /var/archives/myarchiv</tt></li>
+</ul>
+
+<p>This is just an abbreviation for "merge". After the processing the optimized database has the same name as the original one. During the processing a temp file name is used.</p>
 
 </dd>
+
 
 <dt>Retrieving functions:</dt>
 <dd><span class="zue">joda -q&nbsp;&nbsp; database query [from] [until] [fFilter] [maxHits] [sortOrder] [info]<br>
@@ -194,6 +205,10 @@ Sorting order is "by time" instead of "by weight".</li>
 <li><tt>joda -q database  "Barney NEAR Flintstone*" . . . . . 1</tt><br>
 Both Barney and Flintstones have to be flagged with info bitvalue 1 
 (ie. must be headline words). In a -q query, a bFilter value of Zero means "undefined" and matches all stored values.</li>
+<li><tt>joda -q database  "Barney NEAR /stone/" . . . . . 1</tt><br>
+is nearly the same using a regular expression search item</li>
+<li><tt>joda -q database:database2  Bill</tt><br>
+finds all files/records with "Bill" in the database named "database2" which has no own config file, using "database.config" (a so called "clone config")</li>
 </ul>
 </dd>
 <br>

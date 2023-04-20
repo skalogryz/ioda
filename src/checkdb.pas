@@ -16,7 +16,7 @@ program CheckDB;
 *)
 
 uses
-   Classes,SysUtils,BTreeFlex,OccTable;
+   Classes,SysUtils,IdList,BTreeFlex,OccTable;
 
 type
 	TPrg	=	class
@@ -32,7 +32,7 @@ type
 					occWords,
 					allwords	:	cardinal;
 					
-					procedure Count(var akt:Tval);
+					procedure Count(const akt:Tval);
 				
 				PUBLIC
 					property 	Worte:cardinal read words;
@@ -71,7 +71,7 @@ begin
 end;
 
 	
-procedure TPrg.Count(var akt:Tval);
+procedure TPrg.Count(const akt:Tval);
 var
 	n	:	longint;
 begin

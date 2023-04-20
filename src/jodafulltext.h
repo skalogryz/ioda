@@ -181,6 +181,11 @@ int jodaInvalidateEntry ( jodaHandle handle, char *words, int id);
 int jodaChainDuplicate ( jodaHandle handle, char *fileName, int lastID, int *id);
 
 /*
+ * int jodaMergeDB ( dst, src, startDate, wordCheck, fileCheck, destructive, verbose )
+ */
+int jodaMergeDB( jodaHandle dst, jodaHandle src, char *startDate, int wordCheck, int fileCheck, int destructive, int verbose);
+
+/*
  * end of jodafulltext.h
  */
 #endif /* JODAFULLTEXT_H */

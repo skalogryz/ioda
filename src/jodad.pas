@@ -39,12 +39,12 @@ Program JodaD;
 *)
 
 uses 
-	CMEM,Classes,SysUtils,Linux,Sockets,JStrings,Volltext,ConfigReader,Logbook,IONet;
+	CMEM,Classes,SysUtils,BaseUnix,Sockets,JStrings,Volltext,ConfigReader,Logbook,IONet;
 	
 {$H+}
 
 const
-	version				=	'3.3';
+	version				=	'3.5';
 	defaultLogbook		=	'/var/log/apps/jodad.log';
 	defaultRcvLen		:	longint	=	$10000;		// aus Sicherheitsgründen: max. Transfervolumen für ankommende Jobs
 	jodaDefaultSocket	: 	word		=	  3359;
@@ -76,14 +76,20 @@ var
 
 
 
+procedure AlarmHandler(sig:longint; info: psiginfo; context:PSigContext); CDECL;
+begin
+	writeln('TIMEOUT - ABORT!'); HALT(10);
+end;
+
+
 constructor TJodaDaemon.Create;
 var
-	cfg			:	TConfigReader;
-	vt				:	TVolltext;
-	db,logbookFN:	string;
-	rcvLen		:	cardinal;
-	i,j,res		:	integer;
-	jodaSocket	: 	word;	
+	cfg				:	TConfigReader;
+	vt					:	TVolltext;
+	db,logbookFN	:	string;
+	rcvLen			:	cardinal;
+	i,j,res			:	integer;
+	jodaSocket		: 	word;	
 	
 begin
 	cfg:=TConfigReader.Create;
@@ -176,6 +182,7 @@ function TJodaDaemon.Action(const msg:string):string;
 var
 	vt,secunda												:	TVolltext;
 	worte														:	TStringList;
+	alarma													: 	TSigHandler;
 	such,von,bis,fFilter,bFilter,inFile,datum,dbn:	string;
 	vlBuf														:	array[0..255] of byte;
 	a															:	array[0..9] of string;
@@ -229,6 +236,8 @@ begin
 				if (n>=3) and (a[3]<>'.') then von:=a[3];
 				if (n>=4) and (a[4]<>'.') then bis:=a[4];
 				if (n>=5) and (a[5]<>'.') then fFilter:=a[5];
+				alarma:=TSigHandler.Create(SIGALRM,@AlarmHandler);
+				fpAlarm(60);	// Laufzeitbegrenzer!
 
 				if cmd[1]='q' then begin
 					if (n>=6) and (a[6]<>'.') then maxTreffer:=StrToIntDef(a[6],100);
@@ -248,6 +257,8 @@ begin
 					end;
 					n:=vt.vlSuche(such,von,bis,fFilter,@vlBuf,vlCount,maxTreffer,sortOrder,overflow);
 				end;
+				fpAlarm(0);
+				alarma.Free;
 				result:=such;
 				result:=result+#10+IntToStr(n);
 				if overflow then result:=result+'+'+#10 else result:=result+#10;

@@ -28,11 +28,10 @@ UNIT SyntaxParser;
 {$H+}
 INTERFACE
 uses
-	SysUtils,Strings,JStrings,IdList;
+	Classes,SysUtils,Strings,JStrings,IdList,RegExpr;
 
 const
 	maxFind		=	$10000;				// maximale Treffer in einem Zwischenergebnis
-	tSPStringLen=  115;					// entspricht dem Wert aus BTreeFlex
 	ANDSTR		=	'AND';
 	ORSTR			=	'OR';
 	NOTSTR		=	'NOT';
@@ -42,22 +41,8 @@ const
 	opsPara		:	set of char		=	['|','\','&','(',')'];
 
 type
-	TOp		=	(NOP,NICHT,UND,ODER,ARG);
-	TSPString=  string[tSPStringLen]; 
-	PParsEl	=	^TParsEl;
-	TParsEl	=	record
-						l,r		:	PParsEl;
-						hits		:	longint;
-						case op	:	TOp of
-						  arg		:  (value:TSPString; strict:boolean);
-						  nop,
-						  nicht,
-						  und,
-						  oder	:  (opArg:longint; idList:TDWList);
-					end;
-
 	TParserProc	=	procedure (var parsEl:TParsEl) of object;
-	TTriggerProc=	procedure (idList:TDWList; const s:string; strict:boolean; diff:longint; operation:TOp) of object;
+	TTriggerProc=	procedure (var parsEl:TParsEl; idList:TDWList; diff:longint; operation:TOp) of object;
 
 	TParser=	class
 						constructor Create(var s:string; var res:integer);
@@ -97,7 +82,46 @@ type
 					end;
 
 
+		function HideRegExe(var s:string):boolean;
+		function UnhideRegExe(s:string):string;
+
+
 IMPLEMENTATION
+
+
+function HideRegExe(var s:string):boolean;
+var
+	regEx		:	TRegExpr;
+	t			:	string;
+begin
+	result:=false;
+	if system.pos('/',s)=0 then EXIT;
+	
+	regEx:=TRegExpr.Create;
+	regEx.Expression:='/(.+?)/';
+	if regEx.Exec(s) then begin
+		repeat
+			if regEx.MatchPos[0]>=0 then begin
+				t:=copy(s,regEx.MatchPos[0],regEx.MatchLen[0]);
+				t:=StrSubst(t,'(',#1,false);
+				t:=StrSubst(t,')',#2,false);
+				t:=StrSubst(t,'|',#3,false);
+				s:=copy(s,1,regEx.MatchPos[0]-1)+t+copy(s,regEx.MatchPos[0]+regEx.MatchLen[0],length(s));
+				result:=true;
+			end;
+		until not regex.ExecNext;
+	end;
+	regEx.Free;
+end;
+
+
+function UnhideRegExe(s:string):string;
+begin
+	s:=StrSubst(s,#1,'(',false);
+	s:=StrSubst(s,#2,')',false);
+	s:=StrSubst(s,#3,'|',false);
+	result:=s;
+end;
 
 
 constructor TParser.Create(var s:string; var res:integer);
@@ -107,13 +131,11 @@ constructor TParser.Create(var s:string; var res:integer);
 		j,c	:	integer;
 	begin
 		j:=i-1; c:=2;
-		while (j>0) and (c>0) do
-		begin
+		while (j>0) and (c>0) do begin
 			case s[j] of 
 				'&','\','|'	:	c:=0;
 				'0'..'9'	:	if c=2 then dec(j) else break;
-				'.'	 	:	if (c=2) then 
-								begin
+				'.'	 	:	if (c=2) then begin
 									dec(j); dec(c);
 								end else
 									break;
@@ -126,64 +148,55 @@ constructor TParser.Create(var s:string; var res:integer);
 
 var
 	i,j,k,worte	:	integer;
+
 begin
 	inherited Create;
 	root:=NIL; such:=NIL; suchlen:=0; oberflau:=false;
 
 	if (s[1]='{') and (s[length(s)]='}') then 
 		s:=copy(s,2,length(s)-2)
-	else
-	begin
+	else begin
 		i:=1; j:=length(s);						// Mehrfach-Blanks komprimieren
-		while i<j do
-		begin
-			if (s[i]=#32) and (s[i+1]=#32) then 
-			begin
+		while i<j do begin
+			if (s[i]=#32) and (s[i+1]=#32) then begin
 				delete(s,i,1);
 				dec(j);
 			end else
 				inc(i)
 		end;
 	
+		HideRegExe(s);
 		s:=StrStrSubst(s,' '+andStr+' ','&',true);
 		s:=StrStrSubst(s,' '+andStr+'.','&.',true);
 		s:=StrStrSubst(s,' '+orStr +' ','|',true);
-		s:=StrStrSubst(s,' '+orStr +'.','|.',true);	// ist nutz- und folgenlos
 		s:=StrStrSubst(s,' '+notStr+' ','\',true);
 		s:=StrStrSubst(s,' '+notStr+'.','\.',true);
 		s:=StrStrSubst(s,' '+nearByStr1,'&.50',true);
-		s:=StrStrSubst(s,' '+nearByStr2,'&.50',true);		
+		s:=StrStrSubst(s,' '+nearByStr2,'&.50',true);
 		s:=StrSubst(s,#39,'"',false);
 		s:=StrSubst(s,':',' ',false);		
-		s:=StrSubst(s,',','&',false);
-		s:=StrSubst(s,'/','|',false);
-		s:=StrSubst(s,'(','[',false);
-		s:=StrSubst(s,')',']',false);
+//		s:=StrSubst(s,',','&',false);			// jetzt RegEx-Kennung, jo 30.5.2005
+//		s:=StrSubst(s,'/','|',false);			// ebenso
 		s:=Trim(s);
 		if (s='') or (s[1] in ops) then s:='*'+s;
 
 		i:=system.pos('"',s);					// z.B.: "hallo wie geht es" wird durch (hallo&3.wie&3.geht&3.es) ersetzt
-		while i>0 do
-		begin
+		while i>0 do begin
 			s[i]:='(';
 			j:=system.pos('"',s);
-			if j>0 then
-			begin
+			if j>0 then begin
 				s[j]:=')';
 				worte:=0;
 				for k:=i+1 to j-1 do 
 					if (s[k]=#32) or (s[k] in opsPara) then inc(worte);
-				if worte>0 then
-				begin
+				if worte>0 then begin
 					for k:=i+1 to j-1 do 
-						if s[k]=#32 then 
-						begin
+						if s[k]=#32 then begin
 							s[k]:='&';
 							s:=copy(s,1,k)+'.'+IntToStr(worte)+copy(s,k+1,length(s));
 							inc(j);
 						end;
-				end else								// ein "Wort" für Literalsuche z.B.: "AND"
-				begin
+				end else	begin						// ein "Wort" für Literalsuche z.B.: "AND"
 					delete(s,j,1);
 					delete(s,i,1);
 				end;
@@ -192,34 +205,28 @@ begin
 		end;
 
 		i:=system.pos('(',s);					// Klammer-Test
-		while i>0 do
-		begin
-			s[i]:='[';
+		while i>0 do begin
+			s[i]:=#5;
 			j:=system.pos(')',s);
-			if j>i then
-			begin
-				s[j]:=']';
+			if j>i then begin
+				s[j]:=#6;
 				worte:=0;
 				for k:=i+1 to j-1 do 
 					if (s[k]=#32) or (s[k] in opsPara) then inc(worte);
-				if worte=0 then					// ein (Wort) ist falsch: Klammern entfernen
-				begin
+				if worte=0 then begin			// ein (Wort) ist falsch: Klammern entfernen
 					delete(s,j,1);
 					delete(s,i,1);
 				end;
-			end else
-			begin
+			end else begin
 				res:=-503; EXIT;
 			end;
 			i:=system.pos('(',s);
 		end;
-
-		s:=StrSubst(s,'[','(',false);
-		s:=StrSubst(s,']',')',false);
+		s:=StrSubst(s,#5,'(',false);
+		s:=StrSubst(s,#6,')',false);
 
 		i:=2; j:=length(s);
-		while i<=j do
-		begin
+		while i<=j do begin
 			if (s[i]=#32) and not 
 				((s[i-1] in ops) or (s[i-1]='-') or 
  				 (((s[i-1]>='0') and (s[i-1]<='9')) and OpVor(s,i)) or
@@ -234,15 +241,11 @@ begin
 		if s[k]='-' then inc(worte);
 	// ^^ nur eine Näherung - ungenau bei mehreren (nicht-zusammenhängenden) Koppelworten!
 	k:=system.pos('-',s);
-	while (k>0) do
-	begin
+	while (k>0) do begin
 		i:=k-1; s[k]:='&'; system.insert('.'+IntToStr(worte),s,k+1);
-		while i>0 do
-		begin
-			if (s[i]=#32) or (s[i] in opsPara) then 
-			begin
-				if s[i+1]='.' then
-				begin
+		while i>0 do begin
+			if (s[i]=#32) or (s[i] in opsPara) then begin
+				if s[i+1]='.' then begin
 					inc(i);
 					while ((i<length(s)) and (s[i+1]>='0') and (s[i+1]<='9')) do inc(i);
 				end; 
@@ -253,8 +256,7 @@ begin
 		system.insert('(',s,i+1);
 
 		i:=k+2;
-		while i<=length(s) do
-		begin
+		while i<=length(s) do begin
 			if (s[i]=#32) or (s[i] in opsPara) then break;
 			inc(i);
 		end;
@@ -267,8 +269,7 @@ begin
 	getmem(such,suchlen+1);
 	strPCopy(such,s);
 	s:='{'+s+'}';
-	if Postfix then
-	begin
+	if Postfix then begin
 		if SyntaxBaum then res:=0 else res:=-502;
 	end else
 		res:=-501;
@@ -281,14 +282,11 @@ procedure TParser.Clear;
 	procedure Clr(akt:PParsEl);			{ Postorder-Traversierung }
 	begin
 		if akt<>NIL then
-			with akt^ do 
-			begin
+			with akt^ do begin
 				Clr(l);
 				Clr(r);
-				if (op<>ARG) and (idList<>NIL) then 
-				begin
-					idList.Free; idList:=NIL
-				end;
+				if ((idList<>NIL) and (parent=NIL)) then idList.Free;
+				if ((op=ARG) and (btResList<>NIL)) then btResList.Free;
 				dispose(akt);
 			end;
 	end;
@@ -317,19 +315,17 @@ var
 
 	procedure rPars(r,t:word);
 	var
-		s	:	TSPString;
+		s	:	shortstring;
 		ch	:	char;
 		b	:	boolean;
 	begin
 		ch:=#0; s:='';
 		while ((i<suchlen-1) or (i=$FFFF)) and
-				((j<suchlen+255-1) or (j=$FFFF)) and (r<2) do
-		begin
+				((j<suchlen+255-1) or (j=$FFFF)) and (r<2) do begin
 			b:=ch='(';
 			inc(i);
 			ch:=such[i];
-			if (ch<>'(') and (ch<>')') and (not (ch in ops)) then
-			begin
+			if (ch<>'(') and (ch<>')') and (not (ch in ops)) then begin
 				inc(r);
 				repeat
 					inc(j); v[j]:=ch;
@@ -340,36 +336,30 @@ var
 
 			if ch='(' then
 				r:=0
-			else if (ch=')') and (t>0) and not b then
-			begin
+			else if (ch=')') and (t>0) and not b then begin
 				while (i<suchlen-1) and (such[i+1]=' ') do inc(i);
 				EXIT;
 			end;
 
-			if (i<suchlen) and (ch in ops) then
-			begin
-				if (i+2<suchlen) and (such[i+1]='.') then
-				begin
+			if (i<suchlen) and (ch in ops) then begin
+				if (i+2<suchlen) and (such[i+1]='.') then begin
 					inc(i); k:=i; inc(i);
 					while (i<suchlen) and (such[i]>='0') and (such[i]<='9') do
 						inc(i);
-					if i-k<12 then
-					begin
+					if i-k<12 then begin
 						move(such[k],s[1],i-k); s[0]:=char(i-k);
 						if such[i]<>#32 then dec(i);
 					end;
 				end;
 
-				if not (v[j] in ops) then  { #255 überflüssig }
-				begin
+				if not (v[j] in ops) then begin	 { #255 überflüssig }
 					inc(j); v[j]:=#255;
 				end;
 
 				rPars(r,t+1);
 
 				inc(j); v[j]:=ch;
-				if s<>'' then
-				begin
+				if s<>'' then begin
 					move(s[1],v[j+1],length(s)); inc(j,length(s));
 					s:='';
 				end;
@@ -395,29 +385,25 @@ end;
 
 function TParser.SyntaxBaum:boolean;
 var
-	cstack,
-	stack		:	TPtrStack;
-	el,l,r	:	PParsEl;
-	s			:	TSPString;
-	i,j,k,cc	:	integer;
-	ok			:	boolean;
-	ch			:	char;
+	cstack,stack	:	TPtrStack;
+	el,l,r			:	PParsEl;
+	s					:	TBayStr;
+	i,j,k,p,q		:	integer;
+	ok					:	boolean;
+	ch					:	char;
 
 begin
 	stack:=TPtrStack.Create;
 	cstack:=TPtrStack.Create;
 
 	i:=0; ok:=true; 
-	while (i<suchlen) and ok do
-	begin
+	while (i<suchlen) and ok do begin
 		new(el); fillchar(el^,sizeof(TParsEl),0);
 		cstack.Push(el);			{ Kontrollstack }
 		ch:=such[i];
-		if ch in ops then
-		begin
+		if ch in ops then begin
 			r:=stack.Pop; l:=stack.Pop;
-			if (r<>NIL) and (l<>NIL) then
-			begin
+			if (r<>NIL) and (l<>NIL) then begin
 				el^.r:=r; el^.l:=l;
 				case ch of
 				  '&' 		: el^.op:=UND;
@@ -426,57 +412,112 @@ begin
 				end;
 			end else
 				ok:=false;
-				
+
 			inc(i);
-			if (i+1<suchlen) and (such[i]='.') then
-			begin															{ Argument folgt }
+			if (i+1<suchlen) and (such[i]='.') then begin	{ Argument folgt }
 				inc(i);
 				j:=i;
 				while (i<suchlen) and (such[i]>='0') and (such[i]<='9') do
 					inc(i);
-				if i-j<12 then
-				begin
+				if i-j<12 then begin
 					move(such[j],s[1],i-j); s[0]:=char(i-j);
-					val(s,el^.opArg,cc);
-					if cc<>0 then
+					val(s,el^.opArg,p);
+					if p<>0 then
 						ok:=false;
 				end else
 					ok:=false;
 			end else
 				el^.opArg:=maxlongint;
 				
-			if such[i]=#255 then inc(i);	{ kommt nur bei Ops mit Parametern vor }
-		end else
-		begin
+			if such[i]=#255 then inc(i);		// kommt nur bei Ops mit Parametern vor
+		end else	begin
 			j:=i;
 			while (i<suchlen) and (such[i]<>#255) and not (such[i] in ops) do inc(i);
-			with el^ do
-			begin
+			with el^ do begin
 				op:=ARG;
-				if i-j<=tSPStringLen then k:=i-j else k:=tSPStringLen;
+				if i-j < sizeOf(TBayStr) then k:=i-j else k:=sizeOf(TBayStr)-1;
 				move(such[j],value[1],k); value[0]:=char(k);
 				value:=Trim(value);
-				if (length(value)=0) or (value='*') then 
+				if ((length(value)=0) or (value='*') or (value='?')) then 
 					ok:=false
-				else if value[length(value)]='*' then  { Suche über Suchbegriff-Länge }
-				begin
-					dec(value[0]);
-					strict:=false;
-				end else
-					strict:=true;
+				else if ((value[1]='/') and (value[length(value)]='/')) then begin
+					if length(value)<5 then 
+						ok:=false
+					else begin
+						value:=copy(value,2,length(value)-2);
+						value:=UnhideRegExe(value);	// RegExe wieder aufdecken
+						strict:=-3;					// ein echter regulärer Ausdruck
+					end;
+				end else begin
+					p:=system.pos('*',value);
+					q:=system.pos('?',value);
+					if ((p=0) and (q=0)) then	// keine Wildcards
+						strict:=2
+					else if ((p=length(value)) and (q=0)) then begin
+						if length(value)<3 then 
+							ok:=false
+						else begin
+							dec(value[0]);
+							strict:=1
+						end;
+					end else if ((p=1) and (q=0) and (system.pos('*',copy(value,2,length(value)-2))=0)) then begin	// nur * am Wortanfang (zus. * am Wortende ist erlaubt)
+						value:=copy(value,2,length(value)-1);		//	ggf. Stern am Ende noch ^^ ignorieren
+						if value[length(value)]='*' then begin
+							dec(value[0]);	
+							strict:=-2;		// => GetSub oder MultipleSearch.case -2
+						end else
+							strict:=-1;		// => GetTail oder MultipleSearch.case -1
+						if length(value)<3 then ok:=false;
+					end else begin
+						if length(value)>=3 then begin
+							value:=StrSubst(value,'?','.',false);
+							while system.pos('**',value)>0 do value:=StrStrSubst(value,'**','*',false);
+							value:=StrStrSubst(value,'*','.*',false);
+							if value[1]='.' then begin
+								while ((length(value)>0) and ((value[1]='.') or (value[1]='*'))) do value:=copy(value,2,length(value)-1);
+							end else						
+								value:='^'+value;
+
+							if ((value[length(value)]='.') or (value[length(value)]='*')) then begin
+								while ((length(value)>0) and ((value[length(value)]='.') or (value[length(value)]='*'))) do dec(value[0]);
+							end else
+								value:=value+'$';
+							
+							strict:=-3;			// => GetRegEx oder MultipleSearch.case -3
+						end else
+							ok:=false;
+					end;
+				end;
+				
+				if ((strict=-3) and (value[1]='^')) then begin
+					p:=2;
+					while p<=length(value) do 
+						case value[p] of
+							'a'..'z',
+							'A'..'Z',
+							'0'..'9'	:	inc(p);
+							else			BREAK;
+						end;
+
+					if ((p>2) and (p<=length(value)) and 
+					    ((value[p]='?') or (value[p]='*') or 
+						 ((p<length(value)) and (value[p]=#123) and (value[p+1]='0')))) then dec(p);  {0,...}
+						 
+					if p>2 then begin 
+						strict:=0; head:=copy(value,2,p-2);
+					end;
+				end;
 			end;
 			if such[i]=#255 then inc(i);
 		end;
 		stack.Push(el);
 	end;
 	el:=stack.Pop;
-	
+
 	if (el=NIL) or (stack.Count>0) then ok:=false;
-	if not ok then
-	begin    		{ ggf. fehlerhafte Verkettungen: per Kontrollstack aufräumen }
+	if not ok then begin    		{ ggf. fehlerhafte Verkettungen: per Kontrollstack aufräumen }
 		el:=cstack.Pop;
-		while el<>NIL do 
-		begin
+		while el<>NIL do begin
 			dispose(el);
 			el:=cstack.Pop;			
 		end;
@@ -513,8 +554,7 @@ begin
 	new(nel2);
 	nel2^:=el^; nel2^.value:=newValue;
 
-	with el^ do
-	begin
+	with el^ do begin
 		op:=link; l:=nel1; r:=nel2; value:='';
 	end;
 	el:=nel2;
@@ -526,8 +566,7 @@ procedure TParser.PostOrder(callback:TParserProc);
 
 	procedure Visit(akt:PParsEl);
 	begin
-		if akt<>NIL then
-		begin
+		if akt<>NIL then begin
 			Visit(akt^.l);
 			Visit(akt^.r);
 			Callback(akt^);
@@ -544,8 +583,7 @@ procedure TParser.preOrder(callback:TParserProc);
 
 	procedure Visit(akt:PParsEl);
 	begin
-		if akt<>NIL then
-		begin
+		if akt<>NIL then begin
 			Callback(akt^);
 			Visit(akt^.l);
 			Visit(akt^.r);
@@ -562,8 +600,7 @@ procedure TParser.inOrder(callback:TParserProc);
 
 	procedure Visit(akt:PParsEl);
 	begin
-		if akt<>NIL then
-		begin
+		if akt<>NIL then begin
 			Visit(akt^.l);
 			Callback(akt^);
 			Visit(akt^.r);
@@ -583,26 +620,22 @@ var
 
 	procedure Visit(akt:PParsEl);
 	begin
-		if akt<>NIL then
-		begin
+		if akt<>NIL then begin
 			Visit(akt^.l);
 			Visit(akt^.r);
 
 			if akt^.op=NOP then
 				stack.Push(akt)
-			else if akt^.op=ARG then
-			begin
+			else if akt^.op=ARG then begin
 				Callback(akt^);
 				stack.Push(akt);
-			end else
-			begin
+			end else begin
 				r:=stack.Pop; l:=stack.Pop;
 				case akt^.op of
 				  NICHT : akt^.hits:=l^.hits;			{ rechts ist die NOT-(Filter-)Komponente }
 
 				  UND :	begin
-								if l^.hits>r^.hits then
-								begin
+								if l^.hits>r^.hits then begin
 									stack.Push(akt^.r);
 									akt^.r:=akt^.l;
 									akt^.l:=stack.Pop;
@@ -612,8 +645,7 @@ var
 							end;
 
 				  ODER: 	begin
-							if l^.hits>r^.hits then
-							begin
+							if l^.hits>r^.hits then begin
 								stack.Push(akt^.r);
 								akt^.r:=akt^.l;
 								akt^.l:=stack.Pop;
@@ -638,40 +670,32 @@ function TParser.Trigger(triggerCB:TTriggerProc; sortOrder:integer):integer;
 
 	procedure Visit(akt:PParsEl);
 	begin
-		with akt^ do
-		begin
+		with akt^ do begin
 			if op=NOP then EXIT;
-			if l^.op=ARG then 
-			begin
+			if l^.op=ARG then begin
 				idList:=TDWList.CreateSorted(maxFind,sortOrder);
-				if (l^.hits>0) and (l^.hits<>maxlongint) then 
-				begin
+				if (l^.hits>0) and (l^.hits<>maxlongint) then begin
 //					write('Untersuche (l): ',l^.value);
-					triggerCB(idList,l^.value,l^.strict,opArg,NOP);
+					triggerCB(l^,idList,opArg,NOP);
 //					writeln(', gefunden: ',idList.Count:4);
 				end;
-			end else 
-			begin
+			end else begin
 				Visit(l);
 				idList:=l^.idList;
 				l^.idList:=NIL;
 			end;
 				
-			if r^.op=ARG then 
-			begin
-				if (r^.hits>0) and (r^.hits<>maxlongint) then 
-				begin
+			if r^.op=ARG then  begin
+				if (r^.hits>0) and (r^.hits<>maxlongint) then begin
 //					write('Untersuche (r): ',r^.value);				
-					triggerCB(idList,r^.value,r^.strict,opArg,op);
+					triggerCB(r^,idList,opArg,op);
 //					writeln(', gefunden: ',idList.Count:4);					
 				end;					
-			end else 
-			begin
+			end else begin
 				Visit(r);
 				case op of
 					ODER	:	if (r^.hits>0) and (r^.hits<>maxlongint) then idList.Assign(r^.idList,false);
-					UND	:	if (r^.hits<>maxlongint) then 
-					begin
+					UND	:	if (r^.hits<>maxlongint) then begin
 //						write('Verknüpfe (r), ');
 						idList.AndMask(r^.idList,opArg);
 //						writeln('verbleiben: ',idList.Count:4);
@@ -689,8 +713,7 @@ function TParser.Trigger(triggerCB:TTriggerProc; sortOrder:integer):integer;
 begin
 	oberflau:=false; result:=0;
 	Visit(root);
-	if (root^.idList<>NIL) and (root^.idList.Count>1) then 
-	begin
+	if (root^.idList<>NIL) and (root^.idList.Count>1) then begin
 // 	writeln('VOR COMPACT:  ',root^.idList.Count:4);
 		root^.idList.Compact(sortOrder);
 // 	writeln('NACH COMPACT: ',root^.idList.Count:4);	

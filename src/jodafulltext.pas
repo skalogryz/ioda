@@ -24,7 +24,7 @@ uses CMEM,Classes,SysUtils,Volltext,HitList;
 
 const
 	VTMAXDBS = 32;
-	version	= '3.3';
+	version = '3.4';
 			 
 type			
 	EConfigError = class(Exception);
@@ -35,13 +35,13 @@ var
 		  
 		  
 
-function jodaOpen(dbname : PChar; ro : integer): integer; cdecl; export;
+function jodaOpen(dbname : PChar; openmode : integer): integer; cdecl; export;
 var
-	vtidx, res	: integer;
-	db				: string;
-	openMode		: TDBMode;
+	vtidx, res : integer;
+	db		   : string;
 						   
 begin
+	res:=0;
 	result:=0;
 	vtidx:=1;
 	while (vtidx<=VTMAXDBS) and (vtdbs[vtidx]<>nil) do inc(vtidx);
@@ -49,8 +49,7 @@ begin
 		result:=-1
 	else begin
 		db:=ChangeFileExt(StrPas(dbname),'');
-		if ro>0 then openMode:=ReadOnlyDB else openMode:=undefinedOpenMode;
-		vtdbs[vtidx]:=TVolltext.Create(db,openMode,res);
+		vtdbs[vtidx]:=TVolltext.Create(db,TDbMode(openmode),res);
 		if res<>0 then begin
 			result:=-abs(res);
 			try
@@ -311,17 +310,35 @@ begin
 			result:=vtdbs[handle].ChainDuplicate(StrPas(fname),lastID,id);
 		end;
 	end;
-end;
+end; { jodaChainDuplicate }
+
+
+function jodaMergeDB(dst, src : integer; startDatum : PChar; wordCheck,fileCheck,destructive,verbose:integer): integer; cdecl; export;
+begin
+	result:=0;
+	if (src<1) or (src>VTMAXDBS) then
+		result:=-1
+	else if (dst<1) or (dst>VTMAXDBS) then
+		result:=-2
+	else if (dst=src) then
+		result:=-3
+	else if (vtdbs[src]=nil) or (vtdbs[dst]=nil) then
+		result:=-4
+	else begin
+		result:=vtdbs[dst].ExecMerge(vtdbs[src],startDatum,wordCheck<>0,fileCheck<>0,destructive<>0,verbose<>0);
+	end;
+end; { jodaMergeDB }
 
 
 exports	
-	jodaOpen, jodaClose,
-   jodaSortIssuesPP, jodaSortIssuesOLP,
-   jodaStore, jodaInvalidateEntry, jodaChainDuplicate,
-   jodaSearch, jodaVLSearch,
-   jodaGetQuery, jodaGetHit, jodaGetHits,
-   (* alternative Interface to the above line: *)
-   jodaSortIssues, jodaGetOneHit, jodaGetAllHits;
+    jodaOpen, jodaClose,
+    jodaSortIssuesPP, jodaSortIssuesOLP,
+    jodaStore, jodaInvalidateEntry, jodaChainDuplicate,
+    jodaSearch, jodaVLSearch,
+    jodaGetQuery, jodaGetHit, jodaGetHits,
+    jodaMergeDB,
+    (* alternative Interface to the above line: *)
+    jodaSortIssues, jodaGetOneHit, jodaGetAllHits;
 
 var
 	i	: integer;

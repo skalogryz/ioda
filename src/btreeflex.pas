@@ -8,6 +8,7 @@
 (*                           Windows-Portierung 9/94                        *)
 (*								    Linux-FP-Portierung 6/01								 *)
 (*								  Dynamische Stringlängen 1/05							 *)
+(*							   Wildcards und RegExpressions 6/05 						 *)
 (*																									 *)
 (*	     							  Fehlermeldungen 100-299		       				 *)
 (*																									 *)
@@ -33,7 +34,7 @@ UNIT BTreeFlex;
 {$H-}
 INTERFACE
 uses
-	Classes,SysUtils;
+	Classes,SysUtils,IdList;
 
 const
 	NODESIZE		=	2048;								// gewünschte Knotengröße
@@ -41,17 +42,6 @@ const
 
 type
 	TIOBuf	=	packed array[0..NODESIZE-1-16] of byte; // Platz für Header abziehen
-	TBayStr	=	string[255-12];
-	PBayStr	=	^TBayStr;
-
-	TVal		=	packed record
-						l,
-						z,
-						dp		:	cardinal;
-						s		:	TBayStr;
-					end;   								//  256 Bytes
-	PVal		=  ^TVal;
-
 	TValArr	=	packed array [0..MAXVALCOUNT-1] of PVal;
 
 	TNode		=  packed record
@@ -64,42 +54,61 @@ type
 					end;
 	PNode		=	^TNode;
 
-	TResList	=	class(TList)
-							PUBLIC
-							constructor Create;
-							destructor  Destroy; OVERRIDE;
-							procedure   Add(const val:TVal);
-							procedure 	Insert(i:cardinal; const val:TVal);
-							procedure	Delete(i:cardinal);
-							procedure 	Unsort;
-							
-							PROTECTED
-							procedure   Clear; OVERRIDE;
-							function		GetVal(i:cardinal):TVal;
-							procedure	SetVal(i:cardinal; const val:TVal);
-							
-							PUBLIC
-							property		v[i:cardinal]:TVal read GetVal write SetVal; DEFAULT;
-					end;
-
-	TCaller	=	procedure (var akt:TVal) of object;
+	TCaller	=	procedure(const akt:TVal) of object;
 	
 	TBayBaum	=	class
 							constructor Create;
 							destructor  Destroy; OVERRIDE;
+							
+							// Inserts a new word
 							function 	Insert(newStr:string; dataptr:cardinal):boolean;
+							// Updates dataptr and/or counter for an existing word
 							function 	Update(s:string; dataptr:cardinal; counter,counterMode:longint):boolean;
+							// Searches a word and returns the words meta information
 							function    SearchWord(s:string; var inf,dataptr:cardinal):boolean;
-							function    HowMany(s:string; strict:boolean):longint;
-							procedure   GetEqual(s:string; Caller:TCaller);  // caller=NIL => LastResult
-							procedure   GetAlike(s:string; Caller:TCaller);
-							procedure   GetAll(Caller:TCaller);
-							procedure 	Unsort;
+							// Counts occurencies of word(s) if strict>0. Returns a guess for strict=0 and a long guess for strict<0
+							function    HowMany(s:string; strict:shortint):longint;
 
+							// results are returned by callback (except MultipleSearch) OR internal result list
+							// STRICT search i.e. foo
+							function    GetEqual(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+							function    GetEqual(s:string; Caller:TCaller):TResList;
+							// HEAD search: head of search item has to match, i.e. foo*, best performance
+							function    GetAlike(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+							function    GetAlike(s:string; Caller:TCaller):TResList;
+							// TAIL search: tail of search item has to match, i.e. *foo, high performance
+							function 	GetTail(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+							function 	GetTail(s:string; Caller:TCaller):TResList;
+							// SUBSTRING search: search item has to be at least a substring, i.e. *foo*, lower performance
+							function    GetSub(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+							function    GetSub(s:string; Caller:TCaller):TResList;
+							// REGEX AFTER HEAD search: uses a regex after a given literal head of the search item , i.e. /^foo.+/
+							// performance depends on the length of the head: high to low
+							function 	GetAlikeRegEx(s,preS:string; Caller:TCaller; maxHits:cardinal):TResList;
+							function 	GetAlikeRegEx(s,preS:string; Caller:TCaller):TResList;
+							// REGEX search, i.e.  /foo.+/, relativly the lowest performance of all search methods
+							function    GetRegEx(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+							function    GetRegEx(s:string; Caller:TCaller):TResList;
+							// ALL IN ONE PASS: Get results for some search items given in a TStringList
+							// where strict < 0 (tail, substring or regex search. NOT used for regex after head search!)
+							// PParsEl records are assigned to the lists string items
+							function    MultipleSearch(sl:TStringList; maxHits:cardinal):TResList;
+							function   	MultipleSearch(sl:TStringList):TResList;
+							// Get all words (sorted output of the complete tree)
+							function    GetAll(Caller:TCaller; maxHits:cardinal):TResList;
+							function    GetAll(Caller:TCaller):TResList;
+
+							// Helper for unsorting the internal result list (for a better [unsorted] building of a new btree)
+							procedure 	Unsort;
+							// Writes back memory stream if it is dirty
 							procedure   Commit; VIRTUAL; ABSTRACT;
+							// Clears ALL data
 							procedure   Clear;  VIRTUAL; ABSTRACT;
-							function    GetElem(var el:TNode; id:cardinal):boolean; VIRTUAL; ABSTRACT;
-							function    SetElem(var el:TNode):boolean; VIRTUAL; ABSTRACT;
+							// Switches temporary memory stream on (meaningless for TMemBayBaum)
+							// improves much better IO for following MultipleSearch or GetAll/GetSub/GetTail-Operations!
+							procedure 	CacheOn;  VIRTUAL; ABSTRACT;
+							// Switches temporary memory stream off if used (meaningless for TMemBayBaum)
+							procedure 	CacheOff; VIRTUAL; ABSTRACT;
 
 							PROTECTED
 							root		:	TNode;
@@ -121,15 +130,18 @@ type
 							procedure 	MoveNodeEl(var el:TNode; i,len:integer);
 							function    bSearch(s:string; alike:boolean; var el:TNode; var i:integer):integer;
 							function    Split(var prev,akt:TNode):boolean;
-							function    Search(s:string;dataptr:cardinal;var el:TNode; var n:integer;strict:boolean):boolean;
-							procedure 	AddResult(var val:TVal);
+							function    Search(s:string; dataptr:cardinal; alike:boolean; var el:TNode; var n:integer):boolean;
+							procedure 	AddResult(const val:TVal);
 							function		GetResult(i:integer):TVal;
 							function 	GetCount:integer;
+							function    GetElem(var el:TNode; id:cardinal):boolean; VIRTUAL; ABSTRACT;
+							function    SetElem(var el:TNode):boolean; VIRTUAL; ABSTRACT;
 
 							PUBLIC
 							property		Results[i:integer]:TVal read GetResult; DEFAULT;
 							//				^^ wenn "caller" der letzten GetXX/TraverseXX-Operation NIL war
 							property		Count:integer read GetCount;
+							property		ResultList:TResList read resList;
 							property    Error:integer read tellError;
 							property		Stopp:boolean write stopped;
 							property		WordCount:cardinal read wordCounter;
@@ -143,137 +155,41 @@ type
 							destructor  Destroy; OVERRIDE;
 							procedure   Commit; OVERRIDE;
 							procedure   Clear;  OVERRIDE;
-
-							function    GetElem(var el:TNode;id:cardinal):boolean; OVERRIDE;
-							function    SetElem(var el:TNode):boolean; OVERRIDE;
+							procedure 	CacheOn;  OVERRIDE;
+							procedure 	CacheOff; OVERRIDE;
 							
 							PROTECTED
-							elStream	:	TStream;
-							myFileName:	string;
-							ro			:	boolean;
+							elStream		:	TStream;
+							myFileName	:	string;
+							ro,roSave	:	boolean;
 							
+							function    GetElem(var el:TNode;id:cardinal):boolean; OVERRIDE;
+							function    SetElem(var el:TNode):boolean; OVERRIDE;
 							procedure	WriteHeader;
 					end;
 						
 	TMemBayBaum=class(TFileBayBaum)
 							constructor Create(const name:string; initSize,growSize:longint; readOnly:boolean; var res:integer);
-							destructor  Destroy; OVERRIDE;
-							procedure   Commit; OVERRIDE;
-							procedure   Clear;  OVERRIDE;
+							destructor  Destroy;  OVERRIDE;
+							procedure   Commit;   OVERRIDE;
+							procedure   Clear;    OVERRIDE;
+							procedure 	CacheOn;  OVERRIDE;
+							procedure 	CacheOff; OVERRIDE;
 					end;
 				
 	
 IMPLEMENTATION
 uses
-	JStreams; 
+	JStreams,RegExpr;
 	
 const
 	tNodeHeaderSize = 16;								// Größe des Headers von TNode (= TNode ohne Puffer und Zeigerarray)
 	tNodeSize=  tNodeHeaderSize+sizeof(TIOBuf);	// effektive Knotengröße (ohne Zeigerarray) DIES WIRD GESPEICHERT & GELESEN!
-	tValSizeN = 12+1;										// Länge der DWord-Werte+Stringlänge in TVal (= TVal mit Leerstring)
 	rootPos	=  512;
 	cs		:	string[95] = ' (c) jo@magnus.de - BTreeFlex is published under LGPL on http://ioda.sourceforge.net/ '#0;
 
 
-// Spezielle TList zum Speichern von BayerBaum-Elementen als Objekte
 
-constructor TResList.Create;
-begin
-	inherited Create;
-end;
-
-
-destructor TResList.Destroy;
-begin
-	Clear;
-	inherited Destroy
-end;
-
-
-procedure TResList.Clear;
-var
-	el		:	PVal;
-	i		:	integer;
-	
-begin
-	for i:=0 to count-1 do begin
-		el:=items[i];
-		if el<>NIL then freemem(el,tValSizeN+length(el^.s));
-	end;
-	inherited Clear;
-end;
-
-
-procedure TResList.Add(const val:TVal);
-var
-	el	:	PVal;
-	l	:	integer;
-	
-begin
-	l:=tValSizeN+length(val.s);
-	getmem(el,l); 
-	system.move(val,el^,l);
-	inherited Add(el);
-end;
-
-
-procedure TResList.Insert(i:cardinal; const val:TVal);
-var
-	el	:	PVal;
-	l	:	integer;
-begin
-	l:=tValSizeN+length(val.s);
-	getmem(el,l); 
-	system.move(val,el^,l);
-	inherited Insert(i,el);
-end;
-
-
-procedure TResList.Delete(i:cardinal);
-var
-	el	:	PVal;
-begin
-	el:=items[i];
-	if el<>NIL then freemem(el,tValSizeN+length(el^.s));
-	inherited Delete(i)
-end;
-
-
-procedure TResList.Unsort;
-var
-	i	:	cardinal;
-begin
-	if count<3 then EXIT;
-	randomize;
-	for i:=0 to 2*count do	// ungefähre Verwirrung
-		Exchange(random(count-1),random(count-1));
-end;
-
-
-function	TResList.GetVal(i:cardinal):TVal;
-begin
-	result:=TVal(items[i]^);
-end;
-
-
-procedure TResList.SetVal(i:cardinal; const val:TVal);
-var
-	el		:	PVal;
-	l1,l2	:	integer;
-begin
-	el:=items[i];
-	l1:=tValSizeN+length(val.s);
-	l2:=tValSizeN+length(el^.s);
-	if l1<>l2 then begin
-		freemem(el,l1);
-		getmem(el,l2); 
-	end;
-	system.move(val,TVal(items[i]^),l2);
-end;
-
-
-
-// Der GANZE Bayerbaum, abstrakt ohne Lese- und Schreibmöglichkeiten
 constructor TBayBaum.Create;
 begin
 	inherited Create;
@@ -561,8 +477,8 @@ end;
 
 
 
-function TBayBaum.Search(s:string; dataptr:cardinal; var el:TNode; var n:integer; strict:boolean):boolean;
-// Suche AB(!) el nach EINEM Element MIT BESTIMMTEM DATAPTR, wenn DATAPTR<>0 
+function TBayBaum.Search(s:string; dataptr:cardinal; alike:boolean; var el:TNode; var n:integer):boolean;
+// Suche AB el^.key nach einem Element mit BESTIMMTEM dataptr, falls dataptr<>0
 var
 	found	:	boolean;
 
@@ -579,7 +495,7 @@ var
 		end;
 
 		if GetElem(akt^,id) and (akt^.counter>0) then
-			case bSearch(s,not strict,akt^,i) of
+			case bSearch(s,alike,akt^,i) of
 			 	0 : if ((dataptr=0) or (akt^.val[i]^.dp=dataptr)) then begin
 						CopyNode(akt^,el); n:=i; found:=true;
 					 end;
@@ -588,6 +504,7 @@ var
 			end;
 		dispose(akt);
 	end;
+
 
 begin
 	found:=false;
@@ -600,7 +517,6 @@ function TBayBaum.SearchWord(s:string; var inf,dataptr:cardinal):boolean;
 var
 	el			:	PNode;
 	i			:	integer;
-	strict	:	boolean;
 begin
 	result:=false;
 	inf:=0; dataptr:=0;
@@ -608,19 +524,11 @@ begin
 		bayError:=101; EXIT; 
 	end;
 
-	if s[length(s)]='*' then begin
-		s:=copy(s,1,length(s)-1); 
-		strict:=false;
-	end else
-		strict:=true;
-
-	if length(s)+1>=sizeOf(TBayStr) then s[0]:=char(sizeOf(TBayStr)-1);
+	if length(s)>=sizeOf(TBayStr)-1 then s[0]:=char(sizeOf(TBayStr)-1);
 	el^.key:=rootPos;
-	if Search(s,0,el^,i,strict) then begin
-		with el^.val[i]^ do begin
-			inf:=z;
-			dataptr:=dp;
-		end;
+	if Search(s,0,false,el^,i) then begin
+		inf:=el^.val[i]^.z;
+		dataptr:=el^.val[i]^.dp;
 		result:=true;
 	end;
 
@@ -628,7 +536,7 @@ begin
 end;
 
 
-function TBayBaum.HowMany(s:string; strict:boolean):longint;
+function TBayBaum.HowMany(s:string; strict:shortint):longint;
 var
 	found	:	longint;
 
@@ -646,44 +554,50 @@ var
 		if not CreateNode(akt) then begin 
 			bayError:=101; EXIT; 
 		end;
-		
-		if GetElem(akt^,id) and (akt^.counter>0) then
-			case bsearch(s,not strict,akt^,i) of
-			  0 : begin
-					ok:=0;
-					repeat
-						n:=i;
-						if not strict then begin
-							t:=copy(akt^.val[i]^.s,1,length(s));
-							if s<>t then inc(ok);
-						end;
-						inc(found,akt^.val[i]^.z);
-						inc(i);
-					until strict or (cardinal(i)>=akt^.counter) or (ok=2);
 
-					if not strict then begin
-						Visit(akt^.val[n]^.l);
-						Visit(akt^.r);
-					end;
+		if GetElem(akt^,id) and (akt^.counter>0) then
+			case bsearch(s,strict<2,akt^,i) of
+			  0 : begin
+						ok:=0; n:=i;
+						repeat
+							if strict<2 then begin
+								t:=copy(akt^.val[i]^.s,1,length(s));
+								if s<>t then inc(ok);
+							end;
+							inc(found,akt^.val[i]^.z);
+							inc(i);
+						until (strict=2) or (cardinal(i)>=akt^.counter) or (ok=2);
+
+						if strict<2 then begin
+							Visit(akt^.val[n]^.l);
+							Visit(akt^.r);
+						end;
 				 end;
 			 -1 : Visit(akt^.val[i]^.l);
 			  1 : Visit(akt^.r);
-		    -128 : begin
-					dispose(akt); EXIT;
-				 end;
 			end;
 
 		dispose(akt);
 	end;
 
+
 begin
 	found:=0;
-	Visit(rootPos);
-	howMany:=found;
+	if strict<0 then begin							// Werte dienen nur der relativen Gewichtung
+		case strict of 
+			-3 :	result:=wordCounter shr 3; 	// RegEx   ¹/8
+			-2 :  result:=wordCounter shr 6;		// GetSub  ¹/64
+			-1	:	result:=wordCounter shr 7; 	// GetTail ¹/128
+		end;
+	end else begin
+		Visit(rootPos);
+		if ((strict=0) and (length(s)<5)) then found:=found shl (5-length(s));
+		result:=found;
+	end;
 end;
 
 
-procedure TBayBaum.AddResult(var val:TVal);
+procedure TBayBaum.AddResult(const val:TVal);
 begin
 	resList.Add(val);
 end;
@@ -711,23 +625,27 @@ begin
 end;
 
 
-procedure TBayBaum.GetEqual(s:string; Caller:TCaller);
+function TBayBaum.GetEqual(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+var
+	c	:	cardinal;
 
 
-	procedure Visit(id:longint);				{ Inorder-Traversierung }
+	procedure Visit(id:cardinal);				{ Inorder-Traversierung }
 	var
 		akt	:	PNode;
 		i		:	integer;
 
 	begin
-		if (id=0) or stopped then EXIT;
+		if (id=0) or (c>maxHits) or stopped then EXIT;
 		if not CreateNode(akt) then begin 
 			bayError:=101; EXIT; 
 		end;
 
 		if GetElem(akt^,id) and (akt^.counter>0) then
 			 case bSearch(s,false,akt^,i) of
-			  0 	:	Caller(akt^.val[i]^);
+			  0 	:	begin 
+			  				Caller(akt^.val[i]^); inc(c); 
+						end;
 			 -1 	: 	Visit(akt^.val[i]^.l);
 			  1	: 	Visit(akt^.r);
 			end;
@@ -736,24 +654,33 @@ procedure TBayBaum.GetEqual(s:string; Caller:TCaller);
 	end;
 
 begin
-	stopped:=false; resList.Clear;
+	stopped:=false; c:=0; resList.Clear;
 	if caller=NIL then caller:=@AddResult;
 	Visit(rootPos);
+	result:=resList;
 end;
 
 
-procedure TBayBaum.GetAlike(s:string; Caller:TCaller);
+function TBayBaum.GetEqual(s:string; Caller:TCaller):TResList;
+begin
+	result:=GetEqual(s,Caller,$100000)
+end;
 
 
-	procedure Visit(id:longint);				{ Inorder-Traversierung }
+function TBayBaum.GetAlike(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+var
+	c	:	cardinal;
+
+
+	procedure Visit(id:cardinal);				{ Inorder-Traversierung }
 	var
 		akt	:	PNode;
-		t		:	string;
+		t		:	TBayStr;
 		i  	:	integer;
 		ok 	:	byte;
 
 	begin
-		if (id=0) or stopped then EXIT;
+		if (id=0) or (c>maxHits) or stopped then EXIT;
 		if not CreateNode(akt) then begin 
 			bayError:=101; EXIT; 
 		end;
@@ -761,43 +688,341 @@ procedure TBayBaum.GetAlike(s:string; Caller:TCaller);
 		if GetElem(akt^,id) and (akt^.counter>0) then
 			case bsearch(s,true,akt^,i) of
 			 0 :	begin
-					ok:=0;
+					ok:=0; t:='';
 					repeat
 						Visit(akt^.val[i]^.l);
-						if ok=0 then Caller(akt^.val[i]^);
+						if ok=0 then begin
+							Caller(akt^.val[i]^); inc(c);
+						end;
 						inc(i);
 						if cardinal(i)<akt^.counter then t:=copy(akt^.val[i]^.s,1,length(s));
 						if s<>t then inc(ok);
-					until (cardinal(i)>=akt^.counter) or (ok=2);
+					until (cardinal(i)>=akt^.counter) or (c>maxHits) or (ok=2);
 					Visit(akt^.r);			{ wegen gleichen Einträgen infolge Split }
 				end;
 			 -1: Visit(akt^.val[i]^.l);
 			  1: Visit(akt^.r);
-		    -128: begin
-					dispose(akt); EXIT;
-				end;
 			end;
 
 		dispose(akt);
 	end;
 
 begin
-	stopped:=false; resList.Clear;
+	stopped:=false; c:=0; resList.Clear;
 	if caller=NIL then caller:=@AddResult;
 	Visit(rootPos);
+	result:=resList;
 end;
 
 
-procedure TBayBaum.GetAll(Caller:TCaller);
+function TBayBaum.GetAlike(s:string; Caller:TCaller):TResList;
+begin
+	result:=GetAlike(s,Caller,$100000);
+end;
 
 
-	procedure Visit(id:longint);				{ Inorder-Traversierung }
+function TBayBaum.GetSub(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+var
+	c		:	cardinal;
+
+
+	procedure Visit(id:cardinal);				// Inorder-Traversierung mit einfacher Substring-Suche
 	var
 		akt	:	PNode;
 		i		:	integer;
 
 	begin
-		if (id=0) or stopped then EXIT;
+		if (id=0) or (c>maxHits) or stopped then EXIT;
+		if not CreateNode(akt) then begin 
+			bayError:=101; EXIT; 
+		end;
+
+		if GetElem(akt^,id) and (akt^.counter>0) then begin
+			for i:=0 to akt^.counter-1 do begin
+				Visit(akt^.val[i]^.l);
+				if system.pos(s,akt^.val[i]^.s)>0 then begin
+					Caller(akt^.val[i]^);
+					inc(c);
+				end;
+			end;
+			Visit(akt^.r);
+		end;
+		dispose(akt);
+	end;
+
+
+
+begin
+	stopped:=false; c:=0; resList.Clear;
+	if caller=NIL then caller:=@AddResult;
+	Visit(rootPos);
+	result:=resList;
+end;
+
+
+function TBayBaum.GetSub(s:string; Caller:TCaller):TResList;
+begin
+	result:=GetSub(s,Caller,$100000);
+end;
+
+
+function TBayBaum.GetTail(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+var
+	c		:	cardinal;
+	len	:	integer;
+	
+
+	procedure Visit(id:cardinal);				// Inorder-Traversierung mit einfacher Substring-Suche
+	var
+		akt	:	PNode;
+		i,p	:	integer;
+
+	begin
+		if (id=0) or (c>maxHits) or stopped then EXIT;
+		if not CreateNode(akt) then begin 
+			bayError:=101; EXIT; 
+		end;
+
+		if GetElem(akt^,id) and (akt^.counter>0) then begin
+			for i:=0 to akt^.counter-1 do begin
+				Visit(akt^.val[i]^.l);
+				p:=system.pos(s,akt^.val[i]^.s);
+				if ((p>0) and (p=length(akt^.val[i]^.s)-len)) then begin
+					Caller(akt^.val[i]^);
+					inc(c);
+				end;
+			end;
+			Visit(akt^.r);
+		end;
+		dispose(akt);
+	end;
+
+
+
+begin
+	stopped:=false; c:=0; resList.Clear;
+	len:=length(s)-1;
+	if caller=NIL then caller:=@AddResult;
+	Visit(rootPos);
+	result:=resList;
+end;
+
+
+function TBayBaum.GetTail(s:string; Caller:TCaller):TResList;
+begin
+	result:=GetTail(s,Caller,$100000);
+end;
+
+
+function TBayBaum.GetAlikeRegEx(s,preS:string; Caller:TCaller; maxHits:cardinal):TResList;
+var
+	c		:	cardinal;
+	n		:	integer;
+	regEx	:	TRegExpr;
+	el		:	PNode;
+	
+
+	procedure Visit(id:cardinal; n:longint);				{ Inorder-Traversierung }
+	var
+		akt	:	PNode;
+		t		:	TBayStr;
+		i  	:	integer;
+		ok 	:	byte;
+
+	begin
+		if (id=0) or (c>maxHits) or stopped then EXIT;
+		if not CreateNode(akt) then begin 
+			bayError:=101; EXIT; 
+		end;
+
+		if GetElem(akt^,id) and (akt^.counter>0) then
+			if n<0 then 
+				n:=bsearch(preS,true,akt^,i)
+			else begin
+				i:=n; n:=0;
+			end;
+			
+			case n of
+			 0 :	begin
+					ok:=0; t:='';
+					repeat
+						Visit(akt^.val[i]^.l,-1);
+						if ((ok=0) and (regEx.Exec(akt^.val[i]^.s))) then begin
+							Caller(akt^.val[i]^); inc(c);
+						end;
+						inc(i);
+						if cardinal(i)<akt^.counter then t:=copy(akt^.val[i]^.s,1,length(preS));
+						if preS<>t then inc(ok);
+					until (cardinal(i)>=akt^.counter) or (c>maxHits) or (ok=2);
+					Visit(akt^.r,-1);			// wegen gleichen Einträgen infolge Split
+				end;
+			 -1: Visit(akt^.val[i]^.l,-1);
+			  1: Visit(akt^.r,-1);
+			end;
+
+		dispose(akt);
+	end;
+
+
+begin
+	stopped:=false; c:=0; resList.Clear;
+	if caller=NIL then caller:=@AddResult;
+	regEx:=TRegExpr.Create;
+	regEx.Expression:=s;
+	if not CreateNode(el) then begin 
+		bayError:=101; EXIT; 
+	end;
+			
+	el^.key:=rootPos;
+	if Search(preS,0,true,el^,n) then Visit(el^.key,n);
+	dispose(el);
+	regEx.Free;
+	result:=resList;
+end;
+
+
+function TBayBaum.GetAlikeRegEx(s,preS:string; Caller:TCaller):TResList;
+begin
+	result:=GetAlikeRegEx(s,preS,Caller,$100000);
+end;
+
+
+function TBayBaum.GetRegEx(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+var
+	c		:	cardinal;
+	regEx	:	TRegExpr;
+	
+
+	procedure Visit(id:cardinal);				// Inorder-Traversierung mit RegEx-Suche
+	var
+		akt	:	PNode;
+		i		:	integer;
+
+	begin
+		if (id=0) or (c>maxHits) or stopped then EXIT;
+		if not CreateNode(akt) then begin 
+			bayError:=101; EXIT; 
+		end;
+
+		if GetElem(akt^,id) and (akt^.counter>0) then begin
+			for i:=0 to akt^.counter-1 do begin
+				Visit(akt^.val[i]^.l);
+				if regEx.Exec(akt^.val[i]^.s) then begin
+					Caller(akt^.val[i]^); inc(c);
+				end;
+			end;
+			Visit(akt^.r);
+		end;
+		dispose(akt);
+	end;
+
+
+begin
+	stopped:=false; c:=0; resList.Clear;
+	if caller=NIL then caller:=@AddResult;
+	regEx:=TRegExpr.Create;
+	regEx.Expression:=s;
+	Visit(rootPos);
+	regEx.Free;
+	result:=resList;
+end;
+
+
+function TBayBaum.GetRegEx(s:string; Caller:TCaller):TResList;
+begin
+	result:=GetRegEx(s,Caller,$100000);
+end;
+
+
+function TBayBaum.MultipleSearch(sl:TStringList; maxHits:cardinal):TResList;
+var													// untersucht mehrere Suchausdrücke in einem Lauf (effizienter)
+	c			:	cardinal;
+	i			:	integer;
+	regEx		:	TRegExpr;
+	regExe	:	TList;
+
+
+	procedure Visit(id:cardinal);				// Inorder-Traversierung mit einfacher Substring-Suche
+	var
+		akt	:	PNode;
+		i,j,p	:	integer;
+
+	begin
+		if (id=0) or (c>maxHits) or stopped then EXIT;
+		if not CreateNode(akt) then begin 
+			bayError:=101; EXIT; 
+		end;
+
+		if GetElem(akt^,id) and (akt^.counter>0) then begin
+			for i:=0 to akt^.counter-1 do begin
+				Visit(akt^.val[i]^.l);
+				for j:=0 to sl.Count-1 do begin
+					if sl.objects[j]<>NIL then begin
+						case TParsEl(pointer(sl.objects[j])^).strict of
+							-3 :  if TRegExpr(regExe[j]).Exec(akt^.val[i]^.s) then begin
+										if TParsEl(pointer(sl.objects[j])^).btResList<>NIL then TParsEl(pointer(sl.objects[j])^).btResList.Add(akt^.val[i]^) else AddResult(akt^.val[i]^);
+										inc(c);
+									end;
+							-2	:	if system.pos(sl[j],akt^.val[i]^.s)>0 then begin		// beliebige Position im String
+										if TParsEl(pointer(sl.objects[j])^).btResList<>NIL then TParsEl(pointer(sl.objects[j])^).btResList.Add(akt^.val[i]^) else AddResult(akt^.val[i]^);
+										inc(c);
+									end;
+							-1	:	begin																	// am Ende des Strings
+										p:=system.pos(sl[j],akt^.val[i]^.s);
+										if ((p>0) and (p=length(akt^.val[i]^.s)-length(sl[j])+1)) then begin
+											if TParsEl(pointer(sl.objects[j])^).btResList<>NIL then TParsEl(pointer(sl.objects[j])^).btResList.Add(akt^.val[i]^) else AddResult(akt^.val[i]^);
+											inc(c);
+										end;
+									end;
+						end;
+					end;
+				end;
+			end;
+			Visit(akt^.r);
+		end;
+		dispose(akt);
+	end;
+
+begin
+	stopped:=false; c:=0; resList.Clear;
+	regExe:=TList.Create;
+	for i:=0 to sl.Count-1 do begin
+		if ((sl.objects[i]<>NIL) and (TParsEl(pointer(sl.objects[i])^).strict=-3)) then begin
+			regEx:=TRegExpr.Create;
+			regEx.Expression:=sl[i];
+			regExe.Add(regEx);
+		end else
+			regExe.Add(NIL);
+	end;
+
+	Visit(rootPos);
+
+	for i:=0 to sl.Count-1 do begin
+		if ((sl.objects[i]<>NIL) and (TParsEl(pointer(sl.objects[i])^).strict=-3)) then TRegExpr(regExe[i]).Free;
+	end;
+	regExe.Free;
+	result:=resList;
+end;
+
+
+function TBayBaum.MultipleSearch(sl:TStringList):TResList;
+begin
+	result:=MultipleSearch(sl,$100000);
+end;
+
+
+function TBayBaum.GetAll(Caller:TCaller; maxHits:cardinal):TResList;
+var
+	c	:	cardinal;
+
+
+	procedure Visit(id:cardinal);				{ Inorder-Traversierung }
+	var
+		akt	:	PNode;
+		i		:	integer;
+
+	begin
+		if (id=0) or (c>maxHits) or stopped then EXIT;
 		if not CreateNode(akt) then begin 
 			bayError:=101; EXIT; 
 		end;
@@ -806,6 +1031,7 @@ procedure TBayBaum.GetAll(Caller:TCaller);
 			for i:=0 to akt^.counter-1 do begin
 				Visit(akt^.val[i]^.l);
 				Caller(akt^.val[i]^);
+				inc(c);
 			end;
 			Visit(akt^.r);
 		end;
@@ -813,9 +1039,16 @@ procedure TBayBaum.GetAll(Caller:TCaller);
 	end;
 
 begin
-	stopped:=false; resList.Clear;
+	stopped:=false; c:=0; resList.Clear;
 	if caller=NIL then caller:=@AddResult;
 	Visit(rootPos);
+	result:=resList;
+end;
+
+
+function TBayBaum.GetAll(Caller:TCaller):TResList;
+begin
+	result:=GetAll(Caller,maxlongint);
 end;
 
 
@@ -848,6 +1081,7 @@ begin
 		TellQuality:=round((allCounter/wordCounter)*LG(wordCounter));
 end;
 
+
 function TBayBaum.Update(s:string; dataptr:cardinal; counter,counterMode:longint):boolean;
 var
 	akt	:	PNode;
@@ -860,7 +1094,7 @@ begin
 	end;
 	
 	akt^.key:=rootPos;
-	if Search(s,0,akt^,i,true) then begin
+	if Search(s,0,false,akt^,i) then begin
 		if counter<>0 then begin
 			if counterMode=0 then begin			// Counter ist absolute Anzahl
 				allCounter+=cardinal(counter)-akt^.val[i]^.z;
@@ -883,7 +1117,7 @@ constructor TFileBayBaum.Create(const name:string; readOnly:boolean; var res:int
 begin
 	inherited Create;
 	res:=0; elStream:=NIL; myFileName:=name+'.btf'; 
-	ro:=readOnly; 
+	ro:=readOnly; roSave:=readOnly;
 
 	try
 		if FileExists(myFileName) then begin
@@ -973,7 +1207,7 @@ end;
 
 function TFileBayBaum.SetElem(var el:TNode):boolean;
 begin
-	if (el.key<rootPos) or ((el.key-rootPos) mod tNodeSize<>0) or (el.key>elStream.size+tNodeSize) then begin
+	if ((ro) or (el.key<rootPos) or ((el.key-rootPos) mod tNodeSize<>0) or (el.key>elStream.size+tNodeSize)) then begin
 		result:=false;	bayError:=210; EXIT;
 	end;
 	if el.key=rootPos then CopyNode(el,root); 
@@ -991,6 +1225,7 @@ end;
 
 procedure TFileBayBaum.Clear;
 begin 
+	if ro then EXIT;
 	with elStream do begin
 		size:=0; position:=0;
 	end;
@@ -999,6 +1234,29 @@ begin
 	root.key:=rootPos;
 	SetElem(root);
 	top:=rootPos+tNodeSize;
+end;
+
+
+procedure TFileBayBaum.CacheOn;
+begin
+	if elStream is TLargeMemoryStream then EXIT;
+	Commit;
+	elStream.Free;							// TFileStream freigeben
+	elStream:=TLargeMemoryStream.Create(0,0);	// als TLargeMemorystream neu anlegen
+	with elStream as TLargeMemoryStream do LoadFromFile(myFileName);
+	ro:=true;
+end;
+
+
+procedure TFileBayBaum.CacheOff;
+begin
+	if elStream is TFileStream then EXIT;
+	elStream.Free;							// TLargeMemoryStream freigeben
+	ro:=roSave;
+	if ro then 
+		elStream:=TFileStream.Create(myFileName,fmOpenRead)
+	else
+		elStream:=TFileStream.Create(myFileName,fmOpenReadWrite);
 end;
 
 
@@ -1042,5 +1300,14 @@ begin
 	store.Free;
 	dirty:=false;
 end;
+
+
+procedure TMemBayBaum.CacheOn; 
+begin end;
+
+
+procedure TMemBayBaum.CacheOff; 
+begin end;
+
 
 end.

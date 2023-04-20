@@ -33,6 +33,8 @@ INTERFACE
 uses
 	Classes,SysUtils;
 		
+const
+	tValSizeN = 12+1;				// Länge der DWord-Werte+Stringlänge in TVal (= TVal mit Leerstring)
 
 type
 	TStackItem=	record
@@ -173,6 +175,53 @@ type
 						property		Overflow:boolean read oberflau;
 					end;
 						
+// vormals im Unit Btreeflex deklariert:
+	TBayStr	=	string[255-12];
+	PBayStr	=	^TBayStr;
+
+	TVal		=	packed record
+						l,
+						z,
+						dp		:	cardinal;
+						s		:	TBayStr;
+					end;   								//  256 Bytes
+	PVal		=  ^TVal;
+
+	TResList	=	class(TList)
+							PUBLIC
+							constructor Create;
+							destructor  Destroy; OVERRIDE;
+							procedure   Add(const val:TVal);
+							procedure 	Insert(i:cardinal; const val:TVal);
+							procedure	Delete(i:cardinal);
+							procedure 	Unsort;
+							
+							PROTECTED
+							procedure   Clear; OVERRIDE;
+							function		GetVal(i:cardinal):TVal;
+							procedure	SetVal(i:cardinal; const val:TVal);
+							
+							PUBLIC
+							property		v[i:cardinal]:TVal read GetVal write SetVal; DEFAULT;
+					end;
+
+
+// vormals im Unit Syntaxparser deklariert:
+	TOp		=	(NOP,NICHT,UND,ODER,ARG);
+	PParsEl	=	^TParsEl;
+	TParsEl	=	record
+						l,r,
+						parent	:	PParsEl;
+						idList	:	TDWList;
+						hits		:	longint;
+						case op	:	TOp of
+						  arg		:  (btResList:TResList; value,head:TBayStr; strict:shortint; examined:boolean);
+						  nop,
+						  nicht,
+						  und,
+						  oder	:  (opArg:longint);
+					end;
+
 						
 IMPLEMENTATION
 
@@ -416,18 +465,9 @@ end;
 procedure TIdList.Clear;
 var
 	i			:	integer;
-	sorting	:	boolean;
 begin
-	sorting:=sorted;
-	sorted:=false;
-	for i:=0 to count-1 do 
-	begin
-		freemem(PCardArr(objects[i]),8*4);
-		PCardArr(objects[i]):=NIL;
-		strings[i]:='';
-	end;
-	sorted:=sorting;
-	inherited Clear;		// ACHTUNG: Bug bei CMEM-Verwendung?
+	for i:=0 to count-1 do freemem(PCardArr(objects[i]),8*4);
+	inherited Clear;		// ACHTUNG: Bug bei CMEM-Verwendung? [beseitigt]
 end;
 
 
@@ -478,8 +518,7 @@ begin
 	inherited Destroy
 end;
 
-
-// TStringList speziell für String-Hash
+// TStringList für String-Hash
 
 constructor THash.Create;
 begin
@@ -505,14 +544,8 @@ procedure THash.Clear;
 var
 	i	:	integer;
 begin
-	sorted:=false;
-	for i:=0 to count-1 do 
-	begin
-		objects[i].Free;
-		strings[i]:='';
-	end;
-	sorted:=true;
-//	inherited Clear;		ACHTUNG: Bug bei CMEM-Verwendung!
+	for i:=0 to count-1 do objects[i].Free;
+	inherited Clear;		// ACHTUNG: Bug bei CMEM-Verwendung? [beseitigt]
 end;
 
 
@@ -929,5 +962,102 @@ function	TDWList.GetElem(i:integer):TDW;
 begin
 	result:=TDW(items[i]^)
 end;
+
+
+// Liste für Resultate der Bayerbaum-Suche und -Callbacks:
+constructor TResList.Create;
+begin
+	inherited Create;
+end;
+
+
+destructor TResList.Destroy;
+begin
+	Clear;
+	inherited Destroy
+end;
+
+
+procedure TResList.Clear;
+var
+	el		:	PVal;
+	i		:	integer;
+	
+begin
+	for i:=0 to count-1 do begin
+		el:=items[i];
+		if el<>NIL then freemem(el,tValSizeN+length(el^.s));
+	end;
+	inherited Clear;
+end;
+
+
+procedure TResList.Add(const val:TVal);
+var
+	el	:	PVal;
+	l	:	integer;
+	
+begin
+	l:=tValSizeN+length(val.s);
+	getmem(el,l); 
+	system.move(val,el^,l);
+	inherited Add(el);
+end;
+
+
+procedure TResList.Insert(i:cardinal; const val:TVal);
+var
+	el	:	PVal;
+	l	:	integer;
+begin
+	l:=tValSizeN+length(val.s);
+	getmem(el,l); 
+	system.move(val,el^,l);
+	inherited Insert(i,el);
+end;
+
+
+procedure TResList.Delete(i:cardinal);
+var
+	el	:	PVal;
+begin
+	el:=items[i];
+	if el<>NIL then freemem(el,tValSizeN+length(el^.s));
+	inherited Delete(i)
+end;
+
+
+procedure TResList.Unsort;
+var
+	i	:	cardinal;
+begin
+	if count<3 then EXIT;
+	randomize;
+	for i:=0 to 2*count do	// ungefähre Verwirrung
+		Exchange(random(count-1),random(count-1));
+end;
+
+
+function	TResList.GetVal(i:cardinal):TVal;
+begin
+	result:=TVal(items[i]^);
+end;
+
+
+procedure TResList.SetVal(i:cardinal; const val:TVal);
+var
+	el		:	PVal;
+	l1,l2	:	integer;
+begin
+	el:=items[i];
+	l1:=tValSizeN+length(val.s);
+	l2:=tValSizeN+length(el^.s);
+	if l1<>l2 then begin
+		freemem(el,l1);
+		getmem(el,l2); 
+	end;
+	system.move(val,TVal(items[i]^),l2);
+end;
+
 
 end.

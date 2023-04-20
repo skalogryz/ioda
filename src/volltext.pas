@@ -3,7 +3,7 @@ unit Volltext;
 	Das Unit Volltext verbindet die Module Bayerbaum (bayBaum), Vorkommensliste (occTable) 
 	und Dateiliste (fileRef) zu einer Datenbank. Es nutzt einen Parser (syntaxParser), der
 	Suchanfragen zerlegen kann, die die Teilausdrücke gewichtet und die Suche triggert.
-	Die Datenbank selbst kann Wortlisten archivieren - Format: wort[,uebergewicht,info]. 
+	Die Datenbank selbst kann Wortlisten archivieren - Format: wort[,info]. 
 	
 	Sie kann auch einzelne Dateien hinzufügen oder ganze Verzeichnisbäume abscannen. In beiden 
 	Fällen wird ein externen Filter zur Erzeugung der Wortliste benutzt, der in einer
@@ -27,8 +27,9 @@ unit Volltext;
 	jo 01/2004   Doubletten jetzt dreistufig: 0 normal archivieren, 1: mit Erstobjekt verketten, 2: ignorieren
 	jo 05/2004   Höhere Effizienz: occtable (und Schnittstelle dazu) komplett neu geschrieben, idList geringfügig erweitert
 	jo 09/2004   Released under LGPL
-	jo 01/2005   New BTree format: Flexible String length up to 115 Chars, smaller data, faster code.
-					 ! joda ist now UTF-8 compatible !
+	jo 01/2005   New BTree format: Flexible String length up to 243 Chars, smaller data, faster code.
+					 joda is now UTF-8 compatible!
+	jo 06/2005	 Substring and RegEx Search implemented. Optimization made for repeated similar search items.
 }
 
 (* Copyright (C) 1994-2005  jo@magnus.de
@@ -51,15 +52,17 @@ unit Volltext;
 INTERFACE
 uses
 	Classes,Dos{$IFDEF LINUX},BaseUnix,Unix{$ENDIF},SysUtils,
-	JStrings,BtreeFlex,OccTable,fileRefs,SyntaxParser,DirScanner,
-	IdList,Logbook,ConfigReader,RegExpr,MD5,Unicode,HitList;
+	JStrings,IdList,BtreeFlex,OccTable,fileRefs,SyntaxParser,DirScanner,
+	Logbook,ConfigReader,RegExpr,MD5,Unicode,HitList;
 	
 const
 	sortByWeight 		 = 1;
 	sortByAge			 = 2;
 	sortByInfoByWeight = 3;
-	day95		 	 		 = 34700; // Differenz-Tage zwischen 1900 (TDateTime=0) und 1995 (occTable.date=0)
-
+	day95		 	 		 = 34700; 	// Differenz-Tage zwischen 1900 (TDateTime=0) und 1995 (occTable.date=0)
+	btMaxHits:cardinal = $10000;	// max. Trefferanzahl im Bayerbaum
+	maxHits : cardinal = $100000; // max. Trefferanzahl in der Zwischenliste bei der Suche
+	
 type
 	TDbMode		=	(ReadWriteDB=0,ReadOnlyDB=1,ReadOnlyDBNoCache=2,undefinedOpenMode=255);
 
@@ -156,7 +159,9 @@ type
 						PROTECTED
 						treffer			:	THitList;
 						tmpdup			:	TDupSortList;
-						unworte			:	TStringList;
+						unworte,
+						flList,
+						btResList		:	TStringList;
 						btree				:	TBaybaum;
 						occ				:	TClusterMaster;
 						fileRef			:	TfileRef;
@@ -167,7 +172,8 @@ type
 						fileList			:	THash;
 						utf8Decoder		:	TUTF8Decoder;
 						issueOffset,
-						issueLength		:	integer;
+						issueLength,
+						extSearch		:	integer;
 						issuePattern,
 						issuePreferred,
 						dbCfg,
@@ -175,13 +181,13 @@ type
 						basePathName,
 						fFilter,
 						tmpFile,
-						execProg			: 	string;
+						execProg,
+						lastQuery		: 	string;
 						vlbFilterNum,
 						rres,
 						doubletten		:	integer;
 						vlbFilter		:	PByte;
 						maxFind,
-						currentDiff,
 						btreeCapacity,
 						btreeGrowSize,
 						occCapacity,
@@ -198,7 +204,8 @@ type
 						useBigOccList_,
 						occSize,
 						useMemBtree,
-						useFileRef 	:	integer;
+						useFileRef,
+						flPass	 		:	integer;
 						mapFactor		:	real;
 						ro,
 						recycling,
@@ -210,14 +217,14 @@ type
 						tempDB,
 						clonedDB,
 						dbLocked			:	boolean;
-						currentOp		:	TOp;
 
 						function    GetSortedResultMode:string;
 						function		TellError:integer;
 						function 	Age95(const datum:string):longint;
 						function 	Wortzeichen(const s:string):boolean;
-						procedure 	EvaluateHits(var parsEl:TParsEl);
-						procedure   FirstLevelCheck(idList:TDWList; const s:string; strict:boolean; diff:longint; operation:TOp);
+						procedure 	PrepareSearch(var parsEl:TParsEl);
+						procedure   FirstLevelCheck(var parsEl:TParsEl; idList:TDWList; diff:longint; operation:TOp);
+						procedure 	SecondLevelCheck(idL,ocL,curL:TDWList; diff:longint; operation:TOp);
 						function 	ThirdLevelCheck_WithSortedFileRef(id,datum,gewicht,info:cardinal):boolean;
 						function 	ThirdLevelCheck_WithFileRef(id,datum,gewicht,info:cardinal):boolean;
 						function 	ThirdLevelCheck_WithoutFileRef(id,datum,gewicht,info:cardinal):boolean;
@@ -237,7 +244,6 @@ type
 						function 	InvalidateWord(s:string; fid:cardinal):integer;	// Löschen einzelner Worte
 						
 						PUBLIC
-						query		:	AnsiString;
 						property		Suchergebnis[i:integer]:string read GetTreffer; DEFAULT;
 						property		HitPtr[i:integer]:PHit read GetTrefferPtr;
 						property		HitArrayPtr	: PHitArray read GetAllTrefferPtr;
@@ -248,6 +254,7 @@ type
 						property		BasePath	   : string read basePathName write basePathName;
 						property    DatabaseName: string read dbName;
 						property    DatabaseConfigName: string read dbCfg;
+						property		Query:string read lastQuery;
 					end;						   
 
 
@@ -263,9 +270,11 @@ const
 // Volltext-Klassenbester
 constructor TVolltext.Create(const db:string; mode:TDbMode; var res:integer);
 var
-	cfg		:	TConfigReader;
-	st			:	TSystemTime;
-	p			:	integer;
+	cfg			:	TConfigReader;
+	st				:	TSystemTime;
+	p				:	integer;
+	logbookFN	:	string;
+	
 begin
 	inherited Create;
 	tempDB:=false; dbLocked:=false;
@@ -301,7 +310,8 @@ begin
 	maxNums			:=	defaultMaxNums;
 	mapMode  		:= cfg.Int['occMapMode'];
 	mapFactor		:= 0.5;					// Default: 50% der bisherigen Vorkommen eines Wortes reservieren
-	useMemBtree	:= cfg.Int['useMemBtree'];
+	useMemBtree		:= cfg.Int['useMemBtree'];
+	extSearch		:= cfg.Int['extendedSearch'];
 	btreeCapacity	:= cfg.Int['btreeCapacity'];
 	btreeGrowSize	:= cfg.Int['btreeGrowSize'];
 	useBigOccList_	:= cfg.Int['useBigOccList']; occSize:=abs(useBigOccList_);
@@ -325,9 +335,10 @@ begin
 	end;
 
 	fileRef:=NIL; occ:=NIL; btree:=NIL; treffer:=NIL; tmpdup:=NIL; fileList:=NIL;
-	unworte:=NIL; log:=NIL; reg:=NIL; utf8Decoder:=NIL; rres:=0; 
+	unworte:=NIL; log:=NIL; reg:=NIL; utf8Decoder:=NIL; rres:=0; flPass:=0;
 	DateSeparator:='.'; ShortDateFormat:='dd.mm.yyyy'; 
-	log:=TLogbook.Create(dbCfg+'.log',10000,res);
+	logbookFN:=cfg['logbook']; if logbookFN='' then logbookFN:=dbCfg+'.log';
+	log:=TLogbook.Create(logbookFN,10000,res);
 
 	if res<>0 then begin  
 		res:=613; EXIT;
@@ -359,6 +370,8 @@ begin
 		if utf8Decoder=NIL then log.Add('Cannot load "'+cfg['charsettable']+'"',true);
 	end;
 	cfg.Free;
+	flList:=TStringList.Create; flList.sorted:=true;
+	btResList:=TStringList.Create; btResList.sorted:=true;
 	res:=ReOpenDB;
 end;
 
@@ -374,6 +387,8 @@ begin
 	treffer.Free;
 	tmpdup.Free;
 	unworte.Free;
+	flList.Free;
+	btResList.Free;
 	if tempDB then begin
 		DeleteFile(dbName+'.btf');
 		DeleteFile(dbName+'.ocl');
@@ -393,6 +408,7 @@ begin
 	occ.Free;
 	btree.Free;
 	inc(opeNed);
+	result:=-1;
 	try
 		if useMemBtree<>0 then
 			btree:=TMemBaybaum.Create(dbName,btreeCapacity,btreeGrowSize,ro,result)
@@ -542,21 +558,6 @@ begin
 end;
 
 
-procedure TVolltext.EvaluateHits(var parsEl:TParsEl);
-var
-	i	:	integer;
-begin
-	with parsEl do
-	begin
-		if not caseSensitive then value:=AnsiUpperCase(value);
-		if unworte.Find(value,i) then
-			hits:=maxlongint              		// Flag für 'nicht weiter prüfen' 
-		else
-			hits:=btree.HowMany(value,strict);
-	end;
-end;
-
-
 function TVolltext.BTest(info : cardinal) : boolean;
 var
 	fop,fval : PByte;
@@ -626,12 +627,10 @@ begin
 		  53 : res := (((info AND $0000FF00) shr 8)  AND vbyte) = 0;
 		  54 : res := (((info AND $00FF0000) shr 16) AND vbyte) = 0;
 		  55 : res := (((info AND $FF000000) shr 24) AND vbyte) = 0;
-		else
-		begin
-			// invalid operator
+		  else begin 	// invalid operator
 			inc(fop,2); inc(fval,2);
-			continue;
-		end;
+			CONTINUE;
+		  end;
 		end; { case }
 
 		if (((fop^ AND $c0)=$c0) AND (result=false)) then break; { shortcut and }
@@ -648,44 +647,123 @@ begin
 end;	
 
 
-procedure TVolltext.FirstLevelCheck(idList:TDWList; const s:string; strict:boolean; diff:longint; operation:TOp);
+procedure TVolltext.PrepareSearch(var parsEl:TParsEl);
 var
-	currentList	:	TDWList;
-	el				:	TDW;
-	i,j			:	integer;
-	
+	i	:	integer;
 begin
-	currentDiff:=diff; currentOp:=operation;
-	if operation=UND then begin  
-		currentList:=TDWList.Create(0); 	//	currentList.Capacity:=idlist.Count;
-	end else 
-		currentList:=NIL; 					// Hilfsliste für UND-Op.
-
-	if strict then	btree.GetEqual(s,NIL) else	btree.GetAlike(s,NIL);
-	for i:=0 to btree.Count-1 do begin
-		if btree[i].dp = 0 then Continue;
-		occ.GetItemList(btree[i].dp,NIL,false);
-		for j:=0 to occ.Count-1 do begin		// id=dw1, pos=dw2, datum=dw3, gewicht=dw4, info=dw5
-			el:=occ[j];
-			with el do begin						// ehemalige Funktion "SecondLevelCheck"
-				if (dw3>=dStart) and (dw3<=dStop) and ((vlbFilterNum=0) or BTest(dw5)) then 
-				case currentOp of
-					NOP,
-					ODER	:	idlist.AddElem(el);
-					NICHT	:	idlist.DeleteIfFind([dw1,dw2,currentDiff]);
-					UND	:	if idlist.Exists([dw1,dw2,currentDiff]) then currentList.AddElem(el);
-				end;
-			end;
-			if idlist.Overflow then BREAK;
+	with parsEl do begin
+		if not caseSensitive then begin
+			value:=AnsiUpperCase(value);
+			head:= AnsiUpperCase(head);
 		end;
-		if idlist.Overflow then BREAK;
+		
+		if (flList.Find(value,i) and (PParsEl(flList.objects[i])^.strict=strict)) then begin	// Liste im Erstling anlegen
+			if PParsEl(flList.objects[i])^.idList=NIL then PParsEl(flList.objects[i])^.idList:=TDWList.Create(maxHits);
+			parent:=PParsEl(flList.objects[i]);
+			idList:=parent^.idList;					// nur eine "geborgte" Liste (Syntaxparser.Clear berücksichtigt das)
+		end;
+
+		if strict<0 then begin
+			if extSearch>0 then 
+				btResList:=TResList.Create			// Hilfsliste für Substring- und RegEx-Multisuche anlegen
+			else begin
+				hits:=maxlongint; EXIT	        	// Flag für 'nicht weiter prüfen'
+			end;
+		end;
+
+		if ((strict>0) and (unworte.Find(value,i))) then	
+			hits:=maxlongint
+		else begin
+			if strict=0 then 
+				hits:=btree.HowMany(head,strict)
+			else
+				hits:=btree.HowMany(value,strict);
+			flList.AddObject(value,TObject(@parsEl));
+		end;
+	end;
+end;
+
+
+procedure TVolltext.FirstLevelCheck(var parsEl:TParsEl; idList:TDWList; diff:longint; operation:TOp);
+var
+	currentList,occList	:	TDWList;
+	resList					:	TResList;
+	i,res						:	integer;
+
+begin
+	if operation=UND then currentList:=TDWList.Create(maxHits) else currentList:=NIL; // Hilfsliste für UND-Op.
+	resList:=NIL;
+	
+	if ((not parsEl.examined) and ((parsEl.parent=NIL) or (not parsEl.parent^.examined))) then begin 
+		log.Add(parsEl.value+' hits='+IntToStr(parsEl.hits)+ ' strict='+IntToStr(parsEl.strict)+' has_parent='+BoolToStr(parsEl.parent<>NIL)+' extSearch='+IntToStr(extSearch),false);
+		case parsEl.strict of 
+		-3,-2,-1	:	begin
+						if extSearch>1 then begin
+							if flPass=0 then begin		// nur beim ersten Mal den Bayerbaum nach ALLEN sub/regex-Ausdrücken durchsuchen
+								if extSearch=3 then btree.CacheOn;
+								btree.MultipleSearch(flList,btMaxHits);
+								if extSearch=3 then btree.CacheOff;							
+								inc(flPass);
+							end;
+							resList:=parsEl.btResList;// bei weiteren Fällen sind die temp. Resultatlisten bereits gefüllt
+						end else begin			//  konventionelle Lösung ohne Sammellisten ist bei hohen IO-Zeiten schlechter
+							case parsEl.strict of 
+								-3	:	resList:=btree.GetRegEx(parsEl.value,NIL,btMaxHits);
+								-2	:	resList:=btree.GetSub(parsEl.value,NIL,btMaxHits);
+								-1 : 	resList:=btree.GetTail(parsEl.value,NIL,btMaxHits);
+							end;
+						end;
+					end;
+			 0 : 	resList:=btree.GetAlikeRegEx(parsEl.value,parsEl.head,NIL,btMaxHits);
+			 1 : 	resList:=btree.GetAlike(parsEl.value,NIL,btMaxHits);
+			 2 : 	resList:=btree.GetEqual(parsEl.value,NIL,btMaxHits);
+		end;
+
+		for i:=0 to resList.Count-1 do begin
+			if resList[i].dp<>0 then begin
+				occList:=occ.GetItemList(resList[i].dp,NIL,false,res);
+				SecondLevelCheck(idList,occList,currentList,diff,operation);
+				if parsEl.idList<>NIL then parsEl.idList.Assign(occList,false);
+				occList.Clear;
+				if idlist.Overflow then BREAK;
+			end;
+		end;
+		
+		parsEl.examined:=true;
+		if parsEl.parent<>NIL then parsEl.parent^.examined:=true;
+	end else begin									// Suchbegriffsdoublette
+		log.Add('Reuse previous results for "'+parsEl.value+'" hits='+IntToStr(parsEl.hits),false);
+		SecondLevelCheck(idList,parsEl.idList,currentList,diff,operation);
 	end;
 
+	if resList<>NIL then resList.Clear;
 	if currentList<>NIL then begin  
 		idlist.AndMask(currentList,diff);	// Abgleich mit der Hilfsliste
 		currentList.Free; 
 	end;
 end;
+
+
+procedure TVolltext.SecondLevelCheck(idL,ocL,curL:TDWList; diff:longint; operation:TOp);
+var
+	i	:	integer;
+	el	:	TDW;
+begin
+	for i:=0 to ocl.Count-1 do begin	// id=dw1, pos=dw2, datum=dw3, gewicht=dw4, info=dw5
+		el:=ocL.Element[i];
+		with el do begin
+			if (dw3>=dStart) and (dw3<=dStop) and ((vlbFilterNum=0) or BTest(dw5)) then 
+			case operation of
+				NOP,
+				ODER	:	idL.AddElem(el);
+				NICHT	:	idL.DeleteIfFind([dw1,dw2,diff]);
+				UND	:	if idL.Exists([dw1,dw2,diff]) then curL.AddElem(el);
+			end;
+		end;
+		if idL.Overflow then BREAK;
+	end;
+end;
+
 
 
 function TVolltext.ThirdLevelCheck_WithSortedFileRef(id,datum,gewicht,info:cardinal):boolean;
@@ -694,7 +772,7 @@ var
 	i,e			:	integer;
 begin
 	result:=false; 
-	if rres>maxFind then EXIT;						// hier werden Doubletten NICHT mitgezählt!
+	if rres>maxFind then EXIT;					// hier werden Doubletten NICHT mitgezählt!
 
 	name:=fileRef[id]; titel:=fileRef.titel[id];
 	e:=fileRef.Error; 
@@ -706,7 +784,7 @@ begin
 					tmpdup.AddWithFileRef(name,titel,id,datum,gewicht,info);
 					inc(i); 
 				end;
-			name:=fileRef[0];		// ggf. Doubletten holen
+			name:=fileRef[0];						// ggf. Doubletten holen
 			e:=fileRef.Error;
 		end;
 		if i>0 then inc(rres);
@@ -775,6 +853,7 @@ begin
 		vlcount:=2;
 	end else
 		vlcount:=0;
+
 	Suche:=vlSuche(such,von,bis,fileFilter,@vlbuf,vlcount,maxTreffer,sortOrder,overflow)
 end;
 
@@ -795,14 +874,14 @@ begin
 			else 
 				log.Add('UTF8-Decoder is *NOT* initialized!',true);
 		end;
-
 		result:=0; vtError:=0; rres:=0;
 		overflow:=false; 
 		maxFind:=maxTreffer;
-		treffer.Free; 
+		treffer.Free;
 		treffer:=THitlist.Create(maxTreffer);
-		tmpdup.Free;
-		tmpdup:=NIL;
+		tmpdup.Free; tmpdup:=NIL;
+		flList.Clear;
+		flPass:=0;
 		if ThirdLevelCheck = @ThirdLevelCheck_WithSortedFileRef then
 			if issueOffset>0 then
 				tmpdup:=TDupSortList.Create(issueOffset,issueLength,issuePreferred)
@@ -811,7 +890,6 @@ begin
 
 		parser:=TParser.Create(such,res);
 		if res=0 then begin  
-
 			if von='' then dStart:=0 	  else dStart:=word(Age95(von));
 			if bis='' then dStop :=$FFFF else dStop :=word(Age95(bis));
 			vlbFilterNum:=bitFilterNum shr 1;
@@ -829,7 +907,7 @@ begin
 				reg.Expression:=ffilter;
 			end;
 
-			parser.Optimizer(@EvaluateHits);	 			 	// mit "Unworten" abgleichen, Häufigkeiten ermitteln und SuchBaum optimieren
+			parser.Optimizer(@PrepareSearch);	 			 	// mit "Unworten" abgleichen, Häufigkeiten ermitteln und SuchBaum optimieren
 			parser.Trigger(@FirstLevelCheck,sortOrder);	// Suche in zwei Ebenen ausführen (inkl. Datums- und Bytefilter anwenden)
 			for i:=0 to parser.Count-1 do	ThirdLevelCheck(parser[i],parser.info1[i],parser.info2[i],parser.info3[i]); // Filefilter anwenden und Ergebnisse speichern
 			overflow:=parser.Overflow;							// Überlauf bei einem Zwischenergebnis 
@@ -839,14 +917,15 @@ begin
 		reg.Free; reg:=NIL;
 		tmpdup.Free; tmpdup:=NIL;
 		parser.Free;
-		query:=such;
-		log.Add('Suche nach '+such+' von '+von+' bis '+bis+' fFilter='+fileFilter+
+		flList.Clear;
+		lastQuery:=UnhideRegExe(such);
+		log.Add('Suche nach '+lastQuery+' von '+von+' bis '+bis+' fFilter='+fileFilter+
 		        ' bFilterLen='+IntToStr(vlbFilterNum)+' hatte '+IntToStr(treffer.Count)+
 				  ' ('+IntToStr(maxTreffer)+') Treffer.'+overStr[overflow],true);
 		if vtError<>0 then log.Add('Fehler! Code='+IntToStr(vtError),false);
 		result:=treffer.Count;
 	except
-		on E:Exception do log.Add('*** Nicht behandelter Fehler während der Suche ('+such+'): '+E.Message,true);	// Fallback wg. Serverbetrieb
+		on E:Exception do log.Add('*** Nicht behandelter Fehler während der Suche ('+lastQuery+'): '+E.Message,true);	// Fallback wg. Serverbetrieb
 	end;
 end;
 
@@ -1250,6 +1329,7 @@ begin
 	end;
 	log.Add('Scanning Files '+pattern+' in '+path,true);
 	scanner:=TDirScanner.Create(dbCfg+'.unfiles.txt');
+	scanner.LockFile:='NOARCHIVE';
 	n:=scanner.Finde(path,pattern,16);	// von "scanner" geborgte Liste
 	log.Add(IntToStr(n)+' Files to archive',true);
 	for i:=0 to n-1 do
@@ -1486,7 +1566,7 @@ var
 	el										:	TVal;
 	idList								:	TDWList;
 	key,dummy,n,optimized,checked	:	cardinal;
-	i,j									:	integer;
+	i,j,res								:	integer;
 	minAge								:	word;
 	fastMode								:	boolean;
 
@@ -1527,7 +1607,7 @@ begin
 
 			if not btree.SearchWord(el.s,dummy,key) then key:=0; // neuer Begriff in der primären DB
 			n:=n+el.z;
-			secunda.occ.GetItemList(el.dp,NIL,false);
+			secunda.occ.GetItemList(el.dp,NIL,false,res);
 			ScanCluster(el.s,key,optimized,checked,idList,minAge);
 			if vtError<>0 then begin  	
 				log.Add('Error '+IntToStr(vtError)+' '+IntToStr(el.z)+' '+el.s,true);

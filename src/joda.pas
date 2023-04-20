@@ -1,7 +1,7 @@
 program joda;
 {$H+}
 
-(* Copyright (C) 1994-2004  jo@magnus.de
+(* Copyright (C) 1994-2005  jo@magnus.de
    This program is free software; you can redistribute it and/or modify it 
 	under the terms of the GNU Lesser General Public License as published by
 	the Free Software Foundation; either version 2.1 of the License, or 
@@ -21,7 +21,7 @@ uses
 	CMEM,Classes,SysUtils,JStrings,ConfigReader,Volltext;
 
 const
-	version			=	'3.4';
+	version			=	'3.5';
 type
 	EConfigError	=	class(Exception);
 
@@ -29,14 +29,15 @@ type
 procedure Help;
 begin
 	writeln('This is joda V. ',version);
-	writeln('Archive incr.:           joda -a  database filepath filePattern [filedatum] {word list(s) from (many) file(s) via filter prog}');
-	writeln('Erase words via filter:  joda -d  database delFile id {word list from file via filter prog}');
-	writeln('Erase words via list:    joda -e  database wordListFile id {word list from file}');
-	writeln('Merger/Optimizer:        joda -m  [-wordcheck] [-filecheck] [-verbose] database sourcedb [minimalDatum] ');
-	writeln('Archive from pipe:       joda -p  database {word list(s) from (many) file(s) via pipe}');
-	writeln('Query:                   joda -q  database searchExpression [from] [until] [fFilter] [maxTreffer] [sortOrder 1|2] [info]');
-	writeln('Query extended:          joda -x  database searchExpression [from] [until] [fFilter] [bFilter] [maxTreffer] [sortOrder 1|2]');
-	writeln('Store one file:          joda -s  database wordListFile (. for pipe) fileRef (. for no file reference) [filedatum] [infobitmap] [id]');
+	writeln('Archive incr.:           joda -a   database filepath filePattern [filedatum] {word list(s) from (many) file(s) via filter prog}');
+	writeln('Erase words via filter:  joda -d   database delFile id {word list from file via filter prog}');
+	writeln('Erase words via list:    joda -e   database wordListFile id {word list from file}');
+	writeln('Merger/Optimizer:        joda -m   [-wordcheck] [-filecheck] [-verbose] database sourcedb [minimalDatum] ');
+	writeln('Optimizer same db:       joda -opt [-wordcheck] [-filecheck] [-verbose] database [minimalDatum] ');
+	writeln('Archive from pipe:       joda -p   database {word list(s) from (many) file(s) via pipe}');
+	writeln('Query:                   joda -q   database searchExpression [from] [until] [fFilter] [maxTreffer] [sortOrder 1|2] [info]');
+	writeln('Query extended:          joda -x   database searchExpression [from] [until] [fFilter] [bFilter] [maxTreffer] [sortOrder 1|2]');
+	writeln('Store one file:          joda -s   database wordListFile (. for pipe) fileRef (. for no file reference) [filedatum] [infobitmap] [id]');
 	HALT(1);
 end;
 
