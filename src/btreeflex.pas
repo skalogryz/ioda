@@ -61,7 +61,7 @@ type
   TBayBaum = class
   public
     constructor Create;
-    destructor  Destroy; OVERRIDE;
+    destructor  Destroy; override;
 
     // Inserts a new word
     function   Insert(newStr:string; dataptr:cardinal):boolean;
@@ -104,14 +104,14 @@ type
     // Helper for unsorting the internal result list (for a better [unsorted] building of a new btree)
     procedure   Unsort;
     // Writes back memory stream if it is dirty
-    procedure   Commit; VIRTUAL; ABSTRACT;
+    procedure   Commit; virtual; abstract;
     // Clears ALL data
-    procedure   Clear;  VIRTUAL; ABSTRACT;
+    procedure   Clear;  virtual; abstract;
     // Switches temporary memory stream on (meaningless for TMemBayBaum)
     // improves much better IO for following MultipleSearch or GetAll/GetSub/GetTail-Operations!
-    procedure   CacheOn;  VIRTUAL; ABSTRACT;
+    procedure   CacheOn;  virtual; abstract;
     // Switches temporary memory stream off if used (meaningless for TMemBayBaum)
-    procedure   CacheOff; VIRTUAL; ABSTRACT;
+    procedure   CacheOff; virtual; abstract;
 
   protected
     root     :  TNode;
@@ -137,11 +137,11 @@ type
     procedure   AddResult(const val:TVal);
     function    GetResult(i:integer):TVal;
     function   GetCount:integer;
-    function    GetElem(var el:TNode; id:cardinal):boolean; VIRTUAL; ABSTRACT;
-    function    SetElem(var el:TNode):boolean; VIRTUAL; ABSTRACT;
+    function    GetElem(var el:TNode; id:cardinal):boolean; virtual; abstract;
+    function    SetElem(var el:TNode):boolean; virtual; abstract;
 
   public
-    property    Results[i:integer]:TVal read GetResult; DEFAULT;
+    property    Results[i:integer]:TVal read GetResult; default;
     //        ^^ wenn "caller" der letzten GetXX/TraverseXX-Operation NIL war
     property    Count:integer read GetCount;
     property    ResultList:TResList read resList;
@@ -156,30 +156,30 @@ type
   TFileBayBaum=class(TBayBaum)
   public
     constructor Create(const name:string; readOnly:boolean; var res:integer);
-    destructor  Destroy; OVERRIDE;
-    procedure   Commit; OVERRIDE;
-    procedure   Clear;  OVERRIDE;
-    procedure   CacheOn;  OVERRIDE;
-    procedure   CacheOff; OVERRIDE;
+    destructor  Destroy; override;
+    procedure   Commit; override;
+    procedure   Clear;  override;
+    procedure   CacheOn;  override;
+    procedure   CacheOff; override;
               
   protected
     elStream    :  TStream;
     myFileName  :  string;
     ro,roSave  :  boolean;
 
-    function    GetElem(var el:TNode;id:cardinal):boolean; OVERRIDE;
-    function    SetElem(var el:TNode):boolean; OVERRIDE;
+    function    GetElem(var el:TNode;id:cardinal):boolean; override;
+    function    SetElem(var el:TNode):boolean; override;
     procedure  WriteHeader;
   end;
             
   TMemBayBaum=class(TFileBayBaum)
   public
     constructor Create(const name:string; initSize,growSize:longint; readOnly:boolean; var res:integer);
-    destructor  Destroy;  OVERRIDE;
-    procedure   Commit;   OVERRIDE;
-    procedure   Clear;    OVERRIDE;
-    procedure   CacheOn;  OVERRIDE;
-    procedure   CacheOff; OVERRIDE;
+    destructor  Destroy;  override;
+    procedure   Commit;   override;
+    procedure   Clear;    override;
+    procedure   CacheOn;  override;
+    procedure   CacheOff; override;
   end;
         
   
