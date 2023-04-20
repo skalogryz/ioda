@@ -1,0 +1,264 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+<HEAD>
+<TITLE>ioda fulltext engine: The Interface of joda</TITLE>
+<META HTTP-EQUIV="Last-Modified" CONTENT="<!--#echo var='LAST_MODIFIED' -->">
+<META NAME="AUTHOR" CONTENT="jo@magnus.de">
+<META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html;CHARSET=iso-8859-15">
+<META NAME="keywords" lang="en" CONTENT="ioda full text engine">
+<style type="text/css">
+p,dt,dd,li 	{ font-family:Arial,Helvetica,sans-serif; font-size:12px; }
+dt		{ margin-top:24px; font-weight:bold; margin-bottom:8px }
+ul 	{ list-style-type:circle }
+ul.none { list-style-type:none }
+.zue  { color:navy; font-weight:bold; text-indent:0px; }
+.bold { font-weight:bold; margin-top:8px; margin-bottom:8px }
+p.i 	{ font-style:italic; }
+p.example { margin-bottom:0px }
+body	{ max-width:800px; background-color:#e5e5e5; background-image:url(texture.png); margin-left:16px; margin-right:16px;" }
+</style>
+</HEAD>
+<BODY>
+<div align="center">
+<a href="https://sourceforge.net/projects/ioda/"><img src="ioda.png" width="204" height="73" border="0" alt="ioda logo"></a>
+<h1>ioda fulltext engine</h1>
+<h2>Interface documentation of the server program jodad</h2>
+</div>
+
+<table width="100%" style="border: 1px dotted gray"><tr>
+<td align="left" width="35%">&laquo;<a href="joda_interface.html">Interface of the command line program joda</a></td>
+<td align="center" width="30%"><a href="index.html">Home</a></td>
+<td align="right" width="35%">&nbsp;</td>
+</tr></table>
+
+<dl>
+<dt>How to talk to the jodad server:</dt>
+<dd><p>jodad offers functions to access the ioda fulltext engine by network 
+communication. This is done by TCP socket communication. </p>
+
+<p>The database name is obligatory the last parameter:<br>
+<tt>&nbsp; &nbsp; jodad -socket=3456 /path_to_database/database_name</tt></p>
+
+<p>You can declare the socket with the "socket" command line parameter:<br>
+<tt>&nbsp; &nbsp; jodad -socket=1234 /path_to_database/database_name</tt><br>
+where 1234 is an example of a socket number. If this parameter is not 
+given, the socket #3359 is used by default.</p>
+
+<p>If the server should offer write access, the parameter -rw has to be
+set, otherwise the server has read only access:<br>
+<tt>&nbsp; &nbsp; jodad -rw -socket=2345 /path_to_database/database_name</tt></p>
+
+<p>jodad can handle multiple databases by one task through one socket:<br>
+<tt>&nbsp; &nbsp; jodad -socket=4567 /apath/database_name1 /bpath/database_name2 ...</tt><br>
+Of course you can start separate jodad's each with another socket.</p>
+
+<p>Theres is one more optional parameter. It defines the maximum packet length:<br>
+<tt>&nbsp; &nbsp; jodad -socket=5678 -rcvLen=1024 /path_to_database/database_name</tt><br>
+If it is not given, the default value of 65536 bytes is used.</p>
+</dd>
+  
+
+<dt>Function overview:</dt>
+
+<dd>Parameters for the communication are given seperated by TABS (\t = character #9).
+This are the possible parameters:<br>
+<pre>
+close:               -c database_name
+erase:               -e database_name wordList id  
+merge:               -m target_database_name source_database_name
+open:                -o database_name
+query:               -q database_name query from until fileFilter maxHits sortOrder bitFilter
+query in UTF-8:      -qu ...
+extended query:      -x database_name query from until fileFilter  bitFilter maxHits sortOrder
+ext.query in UTF-8:  -xu ...
+insert:              -s database_name wordList fileRef datestamp infobyte id
+view status:         -v [database_name]
+</pre>
+<p>Please note that the full pathname of the database_name can be left out if the
+database name is unique under all the databases the requested server has opened.
+Otherwise a full qualified pathname is mandantory. For all calls except -o and except the source database in -m, the requested database has to be already opened from the server. This is done at  execution time by parameter as described above or later at run time with -o.<br>
+The "database name" parameter has to be given to all function, except for "view status", where it is optional. The server shows the the status of all databases it manages if the name is missing.</p>
+
+<p>Communication with the running server can be very easily testet with the Perl 
+script "client.pl" from the "samples" subdirectory of the source package.
+It needs two leading parameters: IP adress and listening socket of the 
+running server: client.pl network socket command parameters
+Example:<br>
+<tt>&nbsp; &nbsp; client.pl localhost 3359 -q database_name "Hello World"</tt><br>
+(parameters of the command lines are separated by spaces, the script wrappes
+them into the internally needed tab splitted format.)</p>
+</dd>
+
+<dt>Functions in detail:</dt>
+
+<dd><span class="zue">-s database wordList [fileRef] [datestamp] [infobyte] [id]</span>
+<ul>	
+<li>database may be a the file name, if unique in the server (see above). Otherwise use a fully qualified pathname for a safe selection.</li>
+<li>The word list is simply structured:
+item[,weight,infobyte] i.e.: "gnu,15,1"
+The optinally "weight" parameter means an addition importance of 
+the word. Weight is used by the retrieving function to sort by weight 
+insteadt of sort by time. The optionally "infobytes" are an additional 
+information attached to the word, i.e. "2" to flag a word in the headline
+of the source or "1" to flag as a leader word etc. The infobyte values 
+can be used for retrieving in a simple way (-q) or a more sophisticated way (-x).
+ You may give joda some meta information about a text if joda is used
+with file references (stand alone). The meta info will be stored
+in the database and joda will show it with the search result. Therefore
+start the meta line with *|*. You can give title information, a teaser 
+text etc. Example: *|*TITLE=Hurrican over Hawaii|SUBTITLE=Blah|350 Words.
+This will be shown with the search result. So you can easily create
+a listing with a short info about the text without opening and parsing
+the text. The internal format of the meta info is done by your choice.
+Only the leading *|* chars at the beginning of the line is important. 
+Words from meta lines will never get indexed. joda does not care about
+the content of a meta line!</li>
+<li>fileRef is the full path of the file to be archived (if is any)
+use a dot "." for a database record instead of a file </li>
+<li>datestamp is an optional parameter. If it is not set, the actually time/date 
+will be used. datestamps are only available if the parameter "useBigOccList" 
+in the database config file is set to 10 or 12. Otherwise no datestamp is 
+stored with the words and the parameter gets ignored in all methods 
+(see above "Extended features").</li>
+<li>id is required if joda is in use without file reference list (*.ref). 
+Otherwise joda will create the id by itself (see "preliminary remarks")
+In other words: Either a fileRef or an ID has to be set!</li>
+<li>infobyte is an optional bitmap which would be OR-ed with the individuell
+(and also optional) infobyte given with each single word. I.e. it is 
+possible to flag each word incividually with a title flag (i.e. "1") and 
+all words of a file or record generally with a flag for a special source 
+(i.e "8"). The detailed documention for this extended feature has to be 
+written as remarked above under "Extended features).</li>
+</ul>     
+</dd>
+
+<dt>Merge two databases into one or optimize a database:</dt>
+<dd><span class="zue">-m target_database source_database</span>
+<ul>
+<li>target database may be a the file name, if unique in the server (see above). Otherwise use a fully qualified pathname for a safe selection. This database has to be already opened.</li>
+<li>source database names has to be a full qualified pathnames without extension. The server opens it after the -m call.</li>
+</ul>
+
+<p>Merge can be used for the optimization of a database. For this purpose, it 
+is sufficient, to create a copy (or softlink) of the source database config
+file as target config file. Now merge the existing database into the
+new (empty) one. The result is a perfect optimized copy of the source database,
+because now all equal words are (internally) pooled in one cluster. This will 
+minimize disk seeks, therefore improves retrieving speed and saves disk space.
+Recommended at least for for completed databases!</p>
+</dd>
+
+<dt>Retrieving functions:</dt>
+<dd><span class="zue">-q&nbsp;&nbsp; database query [from] [until] [fFilter] [maxHits] [sortOrder] [info]<br>
+-qu database query [from] [until] [fFilter] [maxHits] [sortOrder] [info]</span><br>
+<ul>
+<li>database may be a the file name, if unique in the server (see above). Otherwise use a fully qualified pathname for a safe selection.</li>
+<li>query is a word or a combination of words. Parenthesis and the logical
+operators can be used: AND, OR, NOT, and NEAR. It is possible to sharpen
+the query with word distance values after AND and NOT, i.e. AND.4 means 
+that only word hits are valid if the distance is maximum four words.
+Parenthesis should be used to clearify the context. Otherwise the search
+is done sequentially and the result may be not satisfying. Queries are
+always case insensitive.</li>
+<li>from: the earliest date the result should be from (give a dot "." for empty value)</li>
+<li>until: the latest the result should be from (dot ignores)</li>
+<li>fFilter is only available if joda uses file references (master mode, 
+see "preliminary remarks" above). In this case, parts of the filename of
+a indexed file could be used as filter while retrieving. Regular expressions
+can be used (see example below).</li>
+<li>bFilter is the bit filter in the range from 1 to 255. If it is set, the retrieved 
+words have to match the value exacetly. I.e. if you sets the value "1" for all words in an articels headline, you can retrieve those ones by using a bFilter=1. For a more sophisticated way of using bit filters, see below ("-x").</li>
+<li>maxHits means the maximum hit counter. Because joda sorts the results 
+internally, the user will see the most recent "maxHits" hits.</li>
+<li>sortOrder can be set to 1, 2 or 3. "1" means sorting by datestamp in the 
+first line and bny weight in the second line. "2" will sort by weight 
+(and secundary by time) and is the default if no value (or 0) ist given.
+"3" sorts in the first line by the info byte and in the second line by weight.</li>
+</ul>
+
+<p>With -q(u) joda retrieves all files/records with matched the given
+query. The letter "u" means that the query is formatted in UTF-8. Otherwise
+the query has to be in the same ISO-8859-XX format like the archived words.
+If "u" is used, the value "charsettable" in the databases config file has to
+be set to one of the "8859_X.iso translation tables belonging to the joda
+distribution.</p>
+
+<p>The first two lines of jodas respone are always:
+<ul class="none">
+<li>{Query in short form}</li>
+<li>Number of hits</li>
+<li>followed by a list of hits, separated by \n</li>
+</ul>
+<p>The format of the hits depends on the value of "fileref" in the database
+configuration file. Working with filenames (a *.ref file exists), joda answers:</p>
+<ul class="none">
+<li>filename &middot; title &middot; id &middot; datestamp &middot; weight &middot; infobyte<br>
+where "title" is coming from meta information if file refence list is used
+(see above "-s").</li>
+</ul>
+<p>Without file ref joda will answer per hit:</p>
+<ul class="none">
+<li>id &middot; datestamp &middot; weight &middot; infobyte &middot; </li>
+</ul>
+
+<p class="i">Important: " &middot; " chars shown above are TABS in reality, this
+means \t (character #9)!</p>
+<p class="i example">Query examples:</i>
+<ul>
+<li><tt>joda -q Bill</tt><br>
+finds all files/records with "Bill"</li>
+<li><tt>joda -q Bill*</tt><br>
+find all occurences if "Bill", Billy", "Billard" etc. "*" is a wildcard 
+which set only at the tail of a word.</li>
+<li><tt>joda -q "Bill Clinton"</tt><br>
+finds all files/records where Bill and Clinton are in. Same as "Bill AND Clinton"
+or "Bill&Clinton"</li>
+<li><tt>joda -q "'Bill Clinton'"</tt><br>
+is equal to "Bill AND.1 Clinton" and "Bill&.1Clinton". Word distance must be one
+word in the file.</li>
+<li><tt>joda -q "(Bill or Hillary) and.1 Clinton"</tt><br>
+finds all "Bill Clinton" and "Hillary Clinton" but not "Christopher Clinton"</li>
+<li><tt>joda -q "((Bill or Hillary) and.1 Clinton) not Bush"</tt><br>
+find all "Bill Clinton" and "Hillary Clinton" but the word Bush must be missed
+in the article.</li>
+<li><tt>joda -q "Barney NEAR Flintstone*"</tt><br>
+finds all Barneys and Flintstone(s) if the word distance of both words is less or 
+equal to 50. Equal to AND.50. For sharpening the query.</li>
+<li><tt>joda -q "Barney NEAR Flintstone*" 01.01.2002 31.12.2003</tt><br>
+The text with Barneys and the Flintstones has to be last modified (or stored) in 
+2003. Only available if joda handles datestamps (see above). Especially designed 
+for running joda as stand alone database, but can make sense in slave mode to.</li>
+<li><tt>joda -q "Barney NEAR Flintstone*" . . /home/comics</tt><br>
+The filename has to match "/home/comics". If not joda skips the hit.
+The two dots means "no start date" and "no end date" given.</li>
+<li><tt>joda -q "Barney NEAR Flintstone*" . . REGEX=^/var/www/doc/index.html?$</tt><br>
+The filename has to match the regular expression. </li>
+<li><tt>joda -q "Barney NEAR Flintstone*" . . . 50</tt><br>
+Maximum of 50 hits will be shown. Default is 100.</li>
+<li><tt>joda -q "Barney NEAR Flintstone*" . . . . 1</tt><br>
+Sorting order is "by time" instead of "by weight".</li>
+<li><tt>joda -q "Barney NEAR Flintstone*" . . . . . 1</tt><br>
+Either Barney or Flintstones has to be flagged with info bitvalue 1 
+(ie. must be headline words). In a -q query, a bFilter value of Zero 
+means "undefined" and matches all stored values.</li>
+</ul>
+</dd>
+<br>
+
+<dd><span class="zue">
+joda -x&nbsp;&nbsp; database query [from] [until] [fFilter] [bFilter] [maxHits] [sortOrder]<br>
+joda -xu database query [from] [until] [fFilter] [bFilter] [maxHits] [sortOrder]</span><br>
+
+<p>The difference between queries using "-q" and those using "-x" is only the handling of the bit filter. While it is in -q a single value which has to match exactly, its use in -x is more sophisticated.</p>
+<p>[lydon documentation starts here (to be written)]</p>
+</dd>
+</dl>
+
+<table width="100%" style="border: 1px dotted gray"><tr>
+<td align="left" width="35%">&laquo;<a href="joda_interface.html">Interface of the command line program joda</a></td>
+<td align="center" width="30%"><a href="index.html">Home</a></td>
+<td align="right" width="35%">&nbsp;</td>
+</tr></table>
+
+</BODY>
+</HTML>

@@ -1,0 +1,124 @@
+
+Current VL Search:
+------------------
+
+           76543210
+Bitmatrix: O....TTT
+
+Operator (Bit 7): 0 == OR
+                  1 == AND
+
+Unused (Bit 3-6)
+
+Test (Bit 0-2):
+ 0      invalid
+ 1 B1   Byte1       == VAL
+ 2 B2   Byte2 & VAL != 0
+ 3 B3   Byte3       <= VAL
+ 4 B4   Byte3       >= VAL
+
+NewStyle VL Search:
+-------------------
+
+This is completely backward compatible.
+
+                    76543210
+Bitmatrix:          OOTTTTBB
+
+Operator (Bit 7-6): 00        0: OR   (|)
+                    01        1: unused
+                    10        2: AND  (&)
+                    11        3: NOTEST (VAL byte NOT used!)
+                    11000000   : IF     \
+                    11000001   : THEN    \__ not implemented
+                    11000010   : ELSE    /
+                    11000011   : ENDIF  /
+
+Test (Bit 2-5):       0000    0: Old Style VL Search (bits 0-1)
+                      0001    1: Old Style if bits 0-1 are 0
+                      0001    1: =
+                      0010    2: <
+                      0011    3: >
+                      0100    4: AND=
+                      0101    5: AND1
+                      0110    6: unused
+                      0111    7: unused
+                      1000    8: unused
+                      1001    9: !=
+                      1010   10: >=
+                      1011   11: <=
+                      1100   12: AND!
+                      1101   13: AND!1
+                      1110   14: unused
+                      1111   15: unused
+
+Byte (Bit 0-1):           00  0: invalid     (Old B4 if bit 2 is 1)
+                          01  1: Info Byte 1 (Old B1 if bit 2 is 0)
+                          10  2: Info Byte 2 (Old B2 if bit 2 is 0)
+                          11  3: Info Byte 3 (Old B3 if bit 2 is 0)
+
+Complete Case:
+000000  0  invalid
+000001  1  Old B1test
+000010  2  Old B2test
+000011  3  Old B3test
+000100  4  Old B4test
+000101  5  b1 = val
+000110  6  b2 = val
+000111  7  b3 = val
+001000  8  invalid
+001001  9  b1 < val
+001010 10  b2 < val
+001011 11  b3 < val
+001100 12  invalid
+001101 13  b1 > val
+001110 14  b2 > val
+001111 15  b3 > val
+010000 16  invalid
+010001 17  b1 & val = val
+010010 18  b2 & val = val
+010011 19  b3 & val = val
+010100 20  invalid
+010101 21  b1 & val <> 0
+010110 22  b2 & val <> 0
+010111 23  b3 & val <> 0
+011000 24  invalid
+011001 25  invalid
+011010 26  invalid
+011011 27  invalid
+011100 28  invalid
+011101 29  invalid
+011110 30  invalid
+011111 31  invalid
+100000 32  invalid
+100001 33  invalid
+100010 34  invalid
+100011 35  invalid
+100100 36  invalid
+100101 37  b1 <> val
+100110 38  b2 <> val
+100111 39  b3 <> val
+101000 40  invalid
+101001 41  b1 >= val
+101010 42  b2 >= val
+101011 43  b3 >= val
+101100 44  invalid
+101101 45  b1 <= val
+101110 46  b2 <= val
+101111 47  b3 <= val
+110000 48  invalid
+110001 49  b1 & val <> val
+110010 50  b2 & val <> val
+110011 51  b3 & val <> val
+110100 52  invalid
+110101 53  b1 & val = 0
+110110 54  b2 & val = 0
+110111 55  b3 & val = 0
+111000 56  invalid
+111001 57  invalid
+111010 58  invalid
+111011 59  invalid
+111100 60  invalid
+111101 61  invalid
+111110 62  invalid
+111111 63  invalid

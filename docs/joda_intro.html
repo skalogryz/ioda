@@ -1,0 +1,100 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+<HEAD>
+<TITLE>ioda fulltext engine: The Interface of joda</TITLE>
+<META HTTP-EQUIV="Last-Modified" CONTENT="<!--#echo var='LAST_MODIFIED' -->">
+<META NAME="AUTHOR" CONTENT="jo@magnus.de">
+<META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html;CHARSET=iso-8859-15">
+<META NAME="keywords" lang="en" CONTENT="ioda full text engine">
+<style type="text/css">
+p,dt,dd,li 	{ font-family:Arial,Helvetica,sans-serif; font-size:12px; }
+dt		{ margin-top:24px; font-weight:bold; margin-bottom:8px }
+ul 	{ list-style-type:circle }
+ul.none { list-style-type:none }
+.zue  { color:navy; font-weight:bold; text-indent:0px; }
+.bold { font-weight:bold; margin-top:8px; margin-bottom:8px }
+p.i 	{ font-style:italic; }
+p.example { margin-bottom:0px }
+body	{ max-width:800px; background-color:#e5e5e5; background-image:url(texture.png); margin-left:16px; margin-right:16px;" }
+</style>
+</HEAD>
+<BODY>
+<div align="center">
+<a href="https://sourceforge.net/projects/ioda/"><img src="ioda.png" width="204" height="73" border="0" alt="ioda logo"></a>
+<h1>ioda fulltext engine</h1>
+<h2>Introduction to the Interface Documentation of the ioda Binaries</h2>
+</div>
+
+<p>From the ioda project four binaries - working with the same data format -
+are available:</p>
+<ol>
+
+<li>"joda" is a command line program which offers the complete functionality
+of ioda.	This interfase is completely described <a href="joda_interface.html">here</a>.</li>
+
+<li>"jodad" is the server version of joda and offers the main functions.
+Please see <a href="jodad_interface.html">jodad_interface</a>.</li>
+
+<li>"libjodafulltext.so" is a library which can be used native from a 
+C-program or - with the aid of import modules - by other languages. 
+Ready-to-go import moduls for Perl and Python can be found in the 
+ioda project files. The library offers the same main functions as the jodad 
+server. (please see jodafulltext.h in the source package for the interface.).</li>
+
+<li>jodacgi is a CGI program for simple access to the fulltext index
+through a web interface. It offers only retrieving functions.
+The published programm is only a trunk to demonstrate how it works 
+basically. No HTML-formatting is done and the format of the meta data 
+is only a suggestion. Some documentation can be found in the source file jodacgi.pas.</li>
+</ol>
+
+<p class="i">For all cases: Please read THIS document first for understanding the basics.</p>
+
+<h3>Preliminary Remarks:</h3>
+
+<p>joda can index files from the file system and/or files coming from
+a master database, i.e. a SQL database.</p>
+
+<p>In the database config file (*.config) the parameter "useFileRef" decides
+which mode will be used. If set to a value of 1 (on) or 2 (on plus memory 
+cache) joda will create a list (*.ref file) containing all names of the 
+files which has been indexed. In this case joda itself assigns an ID value 
+to every file. This id is stored with every (first occurence of a) word 
+of the file and is used for all retrieving and deleting purposes.</p>
+
+<p>In the other case -  without file reference - no *.ref file will created, 
+joda must get the ID for each record to be stored from the calling programm. 
+In all common cases the ID is the primary or unique key of the database 
+record to be archived.</p>
+
+<h3>Extended Features (datestamp and bitfilters):</h3>
+<p>In general joda stores the source ID of each words, the word position (in a 
+word count value) and an additional, optional info byte. This needs 8 bytes 
+for the first occurence of a word in a file and 4 bytes for repeaters. With 
+the parameter "useBigOccList" it is possible to store more meta data with 
+every word. This needs more disk space and therefore reduces the performance 
+a little. But in the case if joda runs as a stand alone database (without a SQL 
+master database) it could makes sense.</p>
+
+<p>If using "bigOccList=10", joda stores a datestamp with every word. This 
+stamp is 16 bit value, internally counting days from Jan. 1st 1995.
+It enables joda for a datestamp filter while retrieving. So a datestamp 
+range can given (from date ... to date).</p>
+
+<p>If using "bigOccList=12", joda stores a datestamp like descibed above and
+additional 16 bits of information with each(!) word. So the formerly info 
+byte now gets into a triple byte value (24 bit). There are quite sophisticated 
+methods to use this bits as filters for retrieving. For this extended feature, 
+an extra documentation needs to be written ... </p>
+
+<p>Please remember that neither the datestamp nor the infobytes are needed in 
+most cases and surely not, if joda is running rather as a slave to a SQL 
+database that stand alone.</p>
+
+<table width="100%" style="border: 1px dotted gray"><tr>
+<td align="left" width="33%">&nbsp;</td>
+<td align="center" width="33%"><a href="index.html">Home</a></td>
+<td align="right" width="33%"><a href="joda_interface.html">Interface of the command line program joda</a>&raquo;</td>
+</tr></table>
+</BODY>
+</HTML>
