@@ -49,7 +49,7 @@ unit Volltext2;
 INTERFACE
 uses
 	Classes,Dos{$IFDEF LINUX},BaseUnix,Unix{$ENDIF},SysUtils,
-	JStrings,Bayerbaum,SBayerbaum,OccTable2,fileRefs,SyntaxParser,DirScanner,
+	JStrings,Bayerbaum,SBayerbaum,OccTable3,fileRefs,SyntaxParser,DirScanner,
 	IdList,Logbook,ConfigReader,RegExprO,MD5,Unicode;
 	
 const
@@ -63,7 +63,7 @@ type
 
 // Klassenfunktionen:
 	TThirdLevelCheck=function (id,datum,gewicht,info:cardinal):boolean of object;
-	TOptWordFunc=	function (	const wort:string; wCount:cardinal; var key,optimized,checked:cardinal; 
+	TOptWordFunc=	function (	const wort:string; var key,optimized,checked:cardinal; 
 										const idList:TDWList; minAge:word):integer of object;
 
 // Volltext-Klasse:
@@ -161,6 +161,7 @@ type
 						btreeGrowSize,
 						occCapacity,
 						occGrowSize		:	longint;
+						globalInfoBits	:	cardinal;
 						dStart,
 						dSTop				:	word;
 						mapMode,
@@ -168,6 +169,7 @@ type
 						maxNums,
 						opeNed,
 						useBigOccList_,
+						occSize,
 						useMemBtree_,
 						usefileRef_ 	:	integer;
 						mapFactor		:	real;
@@ -193,12 +195,12 @@ type
 						function 	ThirdLevelCheck_WithoutFileRef(id,datum,gewicht,info:cardinal):boolean;
 						function 	BTest(info:cardinal):boolean;
 						function		GetTreffer(i:integer):string;
-						function 	InsertWord(s:string; fid,fpos,info,wcount:cardinal; age,weight:word):integer; 
+						function 	InsertWord(s:string; fid,fpos,info,wcount:cardinal; age:word):integer; 
 						function 	GetWordsFromProgram(inFile:string; var id:cardinal; var worte:TStringList):integer;
 
-						function		ScanCluster_WithFileRef(const wort:string; wCount:cardinal; var key,optimized,checked:cardinal; 
+						function		ScanCluster_WithFileRef(const wort:string; var key,optimized,checked:cardinal; 
 																	   const idList:TDWList; minAge:word):integer;
-						function		ScanCluster_WithoutFileRef(const wort:string; wCount:cardinal; var key,optimized,checked:cardinal; 
+						function		ScanCluster_WithoutFileRef(const wort:string; var key,optimized,checked:cardinal; 
 																			const idList:TDWList; minAge:word):integer;
 						function 	InvalidateWord(s:string; fid:cardinal):integer;	// Löschen einzelner Worte
 						
@@ -319,11 +321,12 @@ begin
 	useMemBtree_	:= cfg.Int['useMemBtree'];
 	btreeCapacity	:= cfg.Int['btreeCapacity'];
 	btreeGrowSize	:= cfg.Int['btreeGrowSize'];
-	useBigOccList_	:= cfg.Int['useBigOccList'];
+	useBigOccList_	:= cfg.Int['useBigOccList']; occSize:=abs(useBigOccList_);
 	occCapacity		:= cfg.Int['occCapacity'];
 	occGrowSize		:= cfg.Int['occGrowSize'];
 	usefileRef_		:= cfg.Int['useFileref'];
 	recycling		:= cfg.Int['enableRecycling']=1;
+	globalInfoBits := cardinal(not cfg.Int['localInfoBits']); // Default ist $FFFFFFFF (alle InfoBits wirken Synonym-global)
 	opeNed			:=	0;
 	
 	fileRef:=NIL; occ:=NIL; btree:=NIL; treffer:=NIL; fileList:=NIL;
@@ -816,7 +819,7 @@ begin
 end;
 
 
-function TVolltext.InsertWord(s:string; fid,fpos,info,wcount:cardinal; age,weight:word):integer;
+function TVolltext.InsertWord(s:string; fid,fpos,info,wcount:cardinal; age:word):integer;
 var
 	i				:	longint;
 	c,count,key	:	cardinal;
@@ -829,7 +832,7 @@ begin
 			log.Add('Word "'+s+'" has an invalid key: '+IntToStr(key),true);
 			result:=-604; EXIT
 		end;
-	end else	begin										// erstmaliges Vorkommen des Wortes
+	end else	begin										// erstmaliges Vorkommen des Wortes überhaupt
 		key:=0; count:=0;
 	end;
 
@@ -839,8 +842,7 @@ begin
 		on E:Exception do c:=defCluster
 	end;			
 	if c<defCluster then c:=defCluster else if c>maxCluster then c:=maxCluster;
-	
-	result:=occ.InsertRecord(key,c,fid,fpos,age,weight,info);
+	result:=occ.InsertRecord(key,c,fid,fpos,age,info);
 	if (result=0) and not btree.Insert(s,key) then begin  	// ggf. nur Wortzähler im Baybaum erhöhen
 		log.Add('Btree-Error: '+IntToStr(btree.Error),true);
 		result:=-603;
@@ -850,12 +852,12 @@ end;
 
 function TVolltext.InsertWords(worte:TStringList; fname,datum,md5Sum:string; info:cardinal; var id:cardinal):integer;
 var
-	insList										:	TIdList;
-	a												:	array[0..3] of string;
-	s,titel										:	string;
-	info_											:	cardinal;
-	age											:	longint;
-	i,j,res,n,gewicht_,gewicht,words,w	:	integer;
+	insList				:	TIdList;
+	a						:	array[0..3] of string;
+	s,titel				:	string;
+	info_,inf			:	cardinal;
+	age					:	longint;
+	i,j,res,n,words,w	:	integer;
 	
 begin
 	if ro then begin  
@@ -908,30 +910,27 @@ begin
 		n:=split(s,',',a);
 		if a[0]='' then Continue;
 		s:=AnsiUpperCase(a[0]);
-		if n>0 then gewicht_:=StrToIntDef(a[1],0) else gewicht_:=0;
-		if n>1 then info_:=info OR StrToIntDef(a[2],0) else info_:=info;
-		gewicht:=gewicht_+maxRelGewicht-round(maxRelGewicht*i/w);
-		if gewicht<0 then 
-			gewicht:=0
-		else if gewicht>maxGewicht then
-			gewicht:=maxGewicht;
-			
+		if n>0 then info_:=info OR StrToIntDef(a[n],0) else info_:=info; // kompatibel zu alten Filter mit Gewichtsangabe ("word,gewicht,info")
 		n:=1;
 		if insList.Find(s,j) then begin
-			inc(n); inc(j);
+			inf:=info_ and globalInfoBits;
 			while ((j<insList.Count) and (insList[j]=s)) do begin
-				inc(n); inc(j)
+				if (insList.ids[j][1] and globalInfoBits)<>inf then begin
+					info_:=info_ or (insList.ids[j][1] and globalInfoBits);
+					insList.ids[j][1]:=insList.ids[j][1] or inf;
+				end;
+				inc(n); inc(j);
 			end;
 		end;
-		insList.AddIds(s,[i,info_,gewicht,n]);
+		insList.AddIds(s,[i,info_,n]);
 	end;
 
 	s:=''; n:=1;
 	for i:=0 to insList.Count-1 do				// Einfügelauf
 	try
-		if insList[i]<>s then n:=insList.ids[i][3]; // n (Häufigkeit des Wortes in der Liste) stets dem ersten Eintrag der Gleichen entnehmen
+		if insList[i]<>s then n:=insList.ids[i][2]; // n (Häufigkeit des Wortes in der Liste) stets dem ersten Eintrag der Gleichen entnehmen
 		s:=insList[i];
-		res:=InsertWord(s,id,insList.ids[i][0],insList.ids[i][1],n,age,insList.ids[i][2]);
+		res:=InsertWord(s,id,insList.ids[i][0],insList.ids[i][1],n,age);
 		if res<>-1 then begin  
 			if res<0 then begin  
 				insList.Free; 
@@ -1242,32 +1241,36 @@ begin
 end;
 
 
-function TVolltext.ScanCluster_WithFileRef(const wort:string; wCount:cardinal; var key,optimized,checked:cardinal; const idList:TDWList; minAge:word):integer;
+function TVolltext.ScanCluster_WithFileRef(const wort:string; var key,optimized,checked:cardinal; const idList:TDWList; minAge:word):integer;
 var
 	el						:	TDW;
 	name,titel,av		:	string;
 	i,id,lastID,k,rest:	cardinal;
-	c,j,secErr			:	integer;
+	c,j,secErr,platz,lID	:	longint;
 	
 begin
-	c:=0; result:=0;
+	c:=0; result:=0; lID:=0; platz:=0;
 	if secunda.occ.Count=0 then EXIT;
-	for i:=0 to secunda.occ.Count-1 do						// id=dw1, pos=dw2, datum=dw3, gewicht=dw4, info=dw5
-	begin
+	for i:=0 to secunda.occ.Count-1 do begin	// Platz ermitteln, um optimale Auslastung zu erreichen
+		if secunda.occ[i].dw1=lID then platz+=2 else	platz+=occSize;
+		lID:=secunda.occ[i].dw1;
+	end;
+	lID:=0;
+
+	for i:=0 to secunda.occ.Count-1 do begin	// id=dw1, pos=dw2, datum=dw3, gewicht=dw4 (hier unbenutzt), info=dw5
 		inc(checked);
 		el:=secunda.occ[i];
-		if el.dw3<minAge then Continue;						// zu alten Eintrag überspringen
+		if el.dw3<minAge then Continue;		// zu alten Eintrag überspringen
 
 		if idList.Find([el.dw1],j) then
-			el.dw1:=idList.value[j]								// alte ID schon verarbeitet => gegen neue tauschen
- 		else
-		begin
+			el.dw1:=idList.value[j]				// alte ID schon verarbeitet => gegen neue tauschen
+ 		else begin
 			name:=secunda.fileRef[el.dw1]; secErr:=secunda.TellError;
-			if name='' then Continue; 							// gelöschten Eintrag überspringen
+			if name='' then Continue; 			// gelöschten Eintrag überspringen
 
-			if (fileList<>NIL) then begin 					// Datei noch vorhanden? 
+			if (fileList<>NIL) then begin 	// Datei noch vorhanden? 
 				av:=fileList[name];
-				if av='' then begin								// noch nicht getestet
+				if av='' then begin				// noch nicht getestet
 					if FileExists(basePathName+name) then 
 						av:='1' 
 					else begin
@@ -1289,7 +1292,7 @@ begin
 			end;
 
 			result:=fileRef.NewFilename(name,titel,id);
-			idList.Add([el.dw1,id]);		// Paar alte:neue Id merken
+			idList.Add([el.dw1,id]);			// Paar alte:neue Id merken
 			el.dw1:=id; lastID:=id;
 			while result=0 do
 			begin
@@ -1304,11 +1307,13 @@ begin
 			end;
 		end;
 
-		rest:=wCount-i; if rest>maxCluster then rest:=maxCluster;
+		if el.dw1=lID then platz-=2 else	platz-=occSize;
+		lID:=el.dw1;
+		rest:=(platz+occSize-1) div occSize; if rest>maxCluster then rest:=maxCluster;
 		inc(optimized);
 		k:=key;
-		with el do result:=occ.InsertRecord(k,rest,dw1,dw2,dw3,dw4,dw5);
-		if (result=0) and (key=0) then begin  	// nur ersten key merken!
+		with el do result:=occ.InsertRecord(k,rest,dw1,dw2,dw3,dw5);
+		if (result=0) and (key=0) then begin // nur ersten key merken!
 			key:=k;
 			if not btree.Insert(wort,key) then result:=-604; 
 		end else
@@ -1321,24 +1326,31 @@ begin
 end;
 
 
-function TVolltext.ScanCluster_WithoutFileRef(const wort:string; wCount:cardinal; var key,optimized,checked:cardinal; const idList:TDWList; minAge:word):integer;
+function TVolltext.ScanCluster_WithoutFileRef(const wort:string; var key,optimized,checked:cardinal; const idList:TDWList; minAge:word):integer;
 var
-	el			:	TDW;
-	i,k,rest	:	cardinal;
-	c			:	integer;
+	el					:	TDW;
+	i,k,rest			:	cardinal;
+	c,platz,lID		:	longint;
 	
 begin
-	c:=0; result:=0;
+	c:=0; result:=0; lID:=0; platz:=0;
 	if secunda.occ.Count=0 then EXIT;
-	for i:=0 to secunda.occ.Count-1 do 		// id=dw1, pos=dw2, datum=dw3, gewicht=dw4, info=dw5
-	begin
+	for i:=0 to secunda.occ.Count-1 do begin	// Platz ermitteln, um optimale Auslastung zu erreichen
+		if secunda.occ[i].dw1=lID then platz+=2 else	platz+=occSize;
+		lID:=secunda.occ[i].dw1;
+	end;
+	lID:=0;
+	
+	for i:=0 to secunda.occ.Count-1 do begin	// id=dw1, pos=dw2, datum=dw3, gewicht=dw4 (hier unbenutzt), info=dw5
 		inc(checked);
 		el:=secunda.occ[i];
 		if el.dw3>=minAge then begin  
-			rest:=wCount-i; if rest>maxCluster then rest:=maxCluster;
+			if el.dw1=lID then platz-=2 else	platz-=occSize;
+			lID:=el.dw1;
+			rest:=(platz+occSize-1) div occSize; if rest>maxCluster then rest:=maxCluster;
 			inc(optimized); 
 			k:=key; 
-			with el do result:=occ.InsertRecord(k,rest,dw1,dw2,dw3,dw4,dw5);
+			with el do result:=occ.InsertRecord(k,rest,dw1,dw2,dw3,dw5);
 			if (result=0) and (key=0) then begin  	// nur ersten key merken!
 				key:=k;
 				if not btree.Insert(wort,key) then result:=-604; 
@@ -1347,6 +1359,7 @@ begin
 		end;
 		if result<>0 then EXIT
 	end;
+
 	if (c>0) and not btree.Update(wort,key,c,1) then result:=-612;
 end;
 
@@ -1396,7 +1409,7 @@ begin
 			if not btree.SearchWord(el.s,dummy,key) then key:=0; // neuer Begriff in der primären DB
 			n:=n+el.z;
 			secunda.occ.GetItemList(el.dp,NIL,false);
-			ScanCluster(el.s,el.z,key,optimized,checked,idList,minAge);
+			ScanCluster(el.s,key,optimized,checked,idList,minAge);
 			if vtError<>0 then begin  	
 				log.Add('Error '+IntToStr(vtError)+' ['+IntToStr(fileRef.NextID)+' '+IntToStr(el.z)+'*] '+el.s,true);
 				vtError:=0;
@@ -1411,7 +1424,7 @@ begin
 	log.Add('Merging of '+IntToStr(n)+' words done with result='+IntToStr(vtError),true);
 	if destructive then secunda.Clear;
 {$IFDEF LINUX}	
-	if fastMode then shell('cp -p '+secunda.dbName+'.ref '+dbName+'.ref');
+	if fastMode then shell('cp -pf '+secunda.dbName+'.ref '+dbName+'.ref');
 {$ENDIF}
 	result:=vtError; vtError:=0;
 end;

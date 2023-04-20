@@ -6,7 +6,7 @@ INSTALL=/usr/bin/install
 TARGETS=joda jodacgi jodad checkdb libjodafulltext.so
 
 JODAUNITS=bayerbaum.ppu sbayerbaum.ppu \
-	idlist.ppu occtable2.ppu filerefs.ppu \
+	idlist.ppu occtable3.ppu filerefs.ppu \
 	syntaxparser.ppu \
 	dirscanner.ppu logbook.ppu configreader.ppu \
 	volltext2.ppu ionet2.ppu regexpro.ppu

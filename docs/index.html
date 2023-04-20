@@ -6,19 +6,22 @@
 <META NAME="AUTHOR" CONTENT="jo@magnus.de">
 <META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html;CHARSET=iso-8859-15">
 <META NAME="keywords" lang="en" CONTENT="ioda full text engine">
-<style type="text/css">
-p 		{ font-family:Arial,Helvetica,sans-serif; font-size:12px; text-align:justify;text-indent:11px; }
-li 	{ font-family:Arial,Helvetica,sans-serif; font-size:12px; }
-p.zue { color:navy; font-weight:bold; text-indent:0px; }
-body	{ max-width:800px; background-color:#e5e5e5; background-image:url(texture.png); background-attachment:fixed; margin: 8px 16px 8px 16px" }
-</style>
-</HEAD>
+<link rel="stylesheet" type="text/css" href="styles.css"></HEAD>
 <BODY>
 <div align="center">
 <a href="https://sourceforge.net/projects/ioda/"><img src="ioda.png" width="204" height="73" border="0" alt="ioda logo"></a>
 <h1>ioda fulltext engine</h1>
 </div>
-<p>ioda is a fulltext database written in Pascal. It is a word eating and retrieving engine: It stores unique words from a file or database source in a btree and their repeaters in an flexible and highly space optimized list structure. Each stored word "knews" its source, position in the source, "weight" and some (optional) info bytes. </p>
+
+<table width="100%" class="navtable"><tr>
+<td width="20%">&bull; Home</td>
+<td width="20%"><a href="joda_intro.html">&bull; Introduction</a></td>
+<td width="20%"><a href="joda_interface.html">&bull; joda Program</a></td>
+<td width="20%"><a href="jodad_interface.html">&bull; jodad Server</a></td>
+<td width="20%"><a href="http://sourceforge.net/projects/ioda/">&bull; Project Page</a></td>
+</tr></table>
+<br>
+<p>ioda is a fulltext database written in Pascal. It is a word eating and retrieving engine: It stores unique words from a file or database source in a btree and their repeaters in an flexible and highly space optimized list structure. Each stored word "knews" its source, position in the source and some (optional) info bytes. </p>
 
 <p class="zue">Master and Slave</p>
 <p>ioda can be used stand alone ("master mode") for archiving files. In this case it stores full file names and can archive whole directory trees by one call. On the other hand, ioda can be used as an add on to an existing (i.e. SQL) database in a "slave mode". Therefore it stores the primary (or unique) key of each database record as references to its words.</p>
@@ -34,9 +37,6 @@ body	{ max-width:800px; background-color:#e5e5e5; background-image:url(texture.p
 
 <p class="zue">ISO-8859 Charsets</p>
 <p>At the moment, ioda can handle all ISO-8859-XX charsets. Queries can be made in UTF-8 as long as they can be translated into a 256 byte charset. An enhancement to Unicode is planned when the Pascal compiler supports it.</p>
-
-<p class="zue">Linux preferred</p>
-<p>ioda can be compiled with the latest Free Pascal compiler (version >= 1.93) and makes use of the libraries of Free Pascal.  No other libraries are required. At the moment, it is only guarantied that it runs under Linux, but theoretically it will be a little work to fit it for all other OS, which are supported by Free Pascal.</p>
 
 <p class="zue">Flexible Indexing through external Filters</p>
 <p>For archiving whole directory trees, ioda needs support of an external program. This can be written in any language and may work as pipeline or may generate temporary files. ioda can store additional information on each word. Beside source id and position in the source, each word can have a timestamp and more byte infos.</p>
@@ -62,17 +62,19 @@ body	{ max-width:800px; background-color:#e5e5e5; background-image:url(texture.p
 <p>ioda is in a productive environment ie. as full text index to a Wikipedia mirror:
 <a href="http://lexikon.rhein-zeitung.de/" target="_blank"> http://lexikon.rhein-zeitung.de</a>. Try a query with wildard (*) to force a search, ie. the above <a href="http://lexikon.rhein-zeitung.de/?q=(Albert or Alfred) and.1 Einstein) and Quant* not Physik*" target="_blank">(Albert or Alfred) and.1 Einstein) and Quant* not Physik*</a>.</p>
 
-<p class="zue">Installing and Compilation</p>
-<p>You can use the binares from the bin package immediatly under Linux. For compiling the sources, a Makefile is available in the source package. If you want to use the Perl and/or Python import modules, please install the source or the binary package first! To install all, your can extract the source package, the Perl and/or Python package and the Makefile package into one subdirectory.  Call first "make all" then "make install" from the master Makefile (from makefile package) to do all in one. The Free Pascal Compiler >= 1.9.3 is needed. Importatnt: Switch the Delphi mode in the fpc config file on (-S2)!</p>
+<p class="zue">Compiling and Installing</p>
+<p>You can use the binares from the bin package immediatly under Linux. For compiling the sources, a Makefile is available in the source package. If you want to use the Perl and/or Python import modules, please install the source or the binary package first! To install all, your can extract the source package, the Perl and/or Python package and the Makefile package into one subdirectory.  Call first "make all" then "make install" from the master Makefile (from makefile package) to do all in one. The <a href="http://sourceforge.net/projects/freepascal/">Free Pascal Compiler</a> &ge; 1.9.3 is needed. Important: Switch the Delphi mode in the fpc config file on (-S2)! No other libraries are required for the binaries. At the moment, it is only guarantied that it runs under Linux, but theoretically it will be a little work to fit it for all other OS, which are supported by Free Pascal.</p>
 
-<p class="zue">Links and Documentation</p>
-<ul>
-<li><a href="https://sourceforge.net/projects/ioda/">Project Page</a></p>
-<li><a href="joda_intro.html">Documentation of the Interfaces</a></p>
-<li><a href="http://www.freepascal.org/">Free Pascal Homepage</a></p>
-</ul>
+<table width="100%" class="navtable"><tr>
+<td width="20%">&bull; Home</td>
+<td width="20%"><a href="joda_intro.html">&bull; Introduction</a></td>
+<td width="20%"><a href="joda_interface.html">&bull; joda Program</a></td>
+<td width="20%"><a href="jodad_interface.html">&bull; jodad Server</a></td>
+<td width="20%"><a href="http://sourceforge.net/projects/ioda/">&bull; Project Page</a></td>
+</tr></table>
 
-<p style="text-align:right">Jochen Magnus</p>
-<br>
+<div align="center" style="margin-top:8px">
+<a href="http://sourceforge.net/"><img src="http://sourceforge.net/sflogo.php?group_id=118405&amp;type=4" width="125" height="37"  border="0" alt="SourceForge.net Logo" /></a>
+</div>
 </BODY>
 </HTML>

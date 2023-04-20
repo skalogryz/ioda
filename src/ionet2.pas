@@ -520,7 +520,7 @@ begin
 			if msg='SHUTDOWN' then
 			begin
 				if copy(partner,1,9)='127.0.0.1' then
-				begin						// nur aus lokalem / internen Netz ausführen 
+				begin						// nur aus lokalem Netz ausführen 
 					terminated:=true;	
 					msg:='jodad is going down';
 				end

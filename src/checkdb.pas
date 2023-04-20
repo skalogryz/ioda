@@ -16,7 +16,7 @@ program CheckDB;
 *)
 
 uses
-   Classes,SysUtils,BayerBaum,SBayerBaum,occtable2;
+   Classes,SysUtils,BayerBaum,SBayerBaum,occtable3;
 
 type
 	TPrg	=	class

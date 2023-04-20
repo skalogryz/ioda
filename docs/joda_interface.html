@@ -6,30 +6,21 @@
 <META NAME="AUTHOR" CONTENT="jo@magnus.de">
 <META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html;CHARSET=iso-8859-15">
 <META NAME="keywords" lang="en" CONTENT="ioda full text engine">
-<style type="text/css">
-p,dt,dd,li 	{ font-family:Arial,Helvetica,sans-serif; font-size:12px; }
-dt		{ margin-top:24px; font-weight:bold; margin-bottom:8px }
-ul 	{ list-style-type:circle }
-ul.none { list-style-type:none }
-.zue  { color:navy; font-weight:bold; text-indent:0px; }
-.bold { font-weight:bold; margin-top:8px; margin-bottom:8px }
-p.i 	{ font-style:italic; }
-p.example { margin-bottom:0px }
-body	{ max-width:800px; background-color:#e5e5e5; background-image:url(texture.png); margin-left:16px; margin-right:16px;" }
-</style>
-</HEAD>
+<link rel="stylesheet" type="text/css" href="styles.css"></HEAD>
 <BODY>
 <div align="center">
 <a href="https://sourceforge.net/projects/ioda/"><img src="ioda.png" width="204" height="73" border="0" alt="ioda logo"></a>
 <h1>ioda fulltext engine</h1>
+<table width="100%" class="navtable"><tr>
+<td width="20%"><a href="index.html">&bull; Home</a></td>
+<td width="20%"><a href="joda_intro.html">&bull; Introduction</a></td>
+<td width="20%">&bull; joda Program</td>
+<td width="20%"><a href="jodad_interface.html">&bull; jodad Server</a></td>
+<td width="20%"><a href="http://sourceforge.net/projects/ioda/">&bull; Project Page</a></td>
+</tr></table>
+
 <h2>Interface documentation of the command line program joda</h2>
 </div>
-
-<table width="100%" style="border: 1px dotted gray"><tr>
-<td align="left" with="35%">&laquo;<a href="joda_intro.html">Introduction to the Interface documentation</a></td>
-<td align="center" width="30%"><a href="index.html">Home</a></td>
-<td align="right" width="35%"><a href="jodad_interface.html">Interface of the server program jodad</a>&raquo;</td>
-</tr></table>
 
 <h3>The function list:</h3>
 <dl>
@@ -38,79 +29,34 @@ body	{ max-width:800px; background-color:#e5e5e5; background-image:url(texture.p
 <ul>	
 <li>database means the full path of the database without extension</li>
 <li>wordListFile is the full path to a file containing the word list.
-Use a dot "." if data transfer is done by an input pipe from the caller.<br>
-The word list is simply structured:
-item[,weight,infobyte] i.e.: "gnu,15,1"
-The optinally "weight" parameter means an addition importance of 
-the word. Weight is used by the retrieving function to sort by weight 
-insteadt of sort by time. The optionally "infobytes" are an additional 
-information attached to the word, i.e. "2" to flag a word in the headline
-of the source or "1" to flag as a leader word etc. The infobyte values 
-can be used for retrieving in a simple way (-q) or a more sophisticated way (-x).
- You may give joda some meta information about a text if joda is used
-with file references (stand alone). The meta info will be stored
-in the database and joda will show it with the search result. Therefore
-start the meta line with *|*. You can give title information, a teaser 
-text etc. Example: *|*TITLE=Hurrican over Hawaii|SUBTITLE=Blah|350 Words.
-This will be shown with the search result. So you can easily create
-a listing with a short info about the text without opening and parsing
-the text. The internal format of the meta info is done by your choice.
-Only the leading *|* chars at the beginning of the line is important. 
-Words from meta lines will never get indexed. joda does not care about
-the content of a meta line!</li>
-<li>fileRef is the full path of the file to be archived (if is any)
-use a dot "." for a database record instead of a file </li>
-<li>datestamp is an optional parameter. If it is not set, the actually time/date 
-will be used. datestamps are only available if the parameter "useBigOccList" 
-in the database config file is set to 10 or 12. Otherwise no datestamp is 
-stored with the words and the parameter gets ignored in all methods 
-(see above "Extended features").</li>
-<li>id is required if joda is in use without file reference list (*.ref). 
-Otherwise joda will create the id by itself (see "preliminary remarks")
-In other words: Either a fileRef or an ID has to be set!</li>
-<li>infobyte is an optional bitmap which would be OR-ed with the individuell
-(and also optional) infobyte given with each single word. I.e. it is 
-possible to flag each word incividually with a title flag (i.e. "1") and 
-all words of a file or record generally with a flag for a special source 
-(i.e "8"). The detailed documention for this extended feature has to be 
-written as remarked above under "Extended features).</li>
+Use a dot "." if data transfer is done by an input pipe from the caller.<br> 
+The word list is simply structured: item[,infobyte] i.e.: "gnu,1" The optionally "infobytes" are an additional information attached to the word, i.e. "2" to flag a word in the headline of the source or "1" to flag as a leader word etc. The infobyte values can be used for retrieving in a simple way (-q) or a more sophisticated way (-x). You may give joda some meta information about a text if joda is used with file references (stand alone). The meta info will be stored in the database and joda will show it with the search result. Therefore start the meta line with *|*. You can give title information, a teaser  text etc. Example: *|*TITLE=Hurrican over Hawaii|SUBTITLE=foo|350 Words. This will be shown with the search result. So you can easily create a listing with a short info about the text without opening and parsing the text. The internal format of the meta info is done by your choice. Only the leading *|* chars at the beginning of the line is important.  Words from meta lines will never get indexed. joda does not care about the content of a meta line!</li>
+<li>fileRef is the full path of the file to be archived (if is any) use a dot "." for a database record instead of a file </li>
+<li>datestamp is an optional parameter. If it is not set, the actually time/date will be used. datestamps are only available if the parameter "useBigOccList" in the database config file is set to 10 or 12. Otherwise no datestamp is stored with the words and the  parameter gets ignored in all methods (see above "Extended features").</li>
+<li>id is required if joda is in use without file reference list (*.ref). Otherwise joda will create the id by itself (see "preliminary remarks") In other words: Either a fileRef or an ID has to be set!</li>
+<li>infobyte is an optional bitmap which would be OR-ed with the individuell (and also optional) infobyte given with each single word. I.e. it is possible to flag each word incividually with a title flag (i.e. "1") and all words of a file or record generally with a flag for a special source (i.e "8"). The detailed documention for this extended feature has to be written as remarked above under "Extended features).</li>
 </ul>     
 
 <p class="i example">Examples:</p>
 <ul>
 <li>joda -s myarchiv myfile_words.txt /home/test/myfile.html 01.12.2003<br>
-stores the word list from "myfile_words.txt" from "myfile.html" using a 
-datestamp (default is actual date)</li>
+stores the word list from "myfile_words.txt" from "myfile.html" using a datestamp (default is actual date)</li>
 <li>joda -s myarchiv . /home/test/myfile.html &lt;myfile_words.txt<br>
 the same but using a piped input from a text file instead a temp file</li>
 <li>filterscript.pl /home/test/myfile.html|joda -s myarchiv . /home/test/myfile.html<br>
-the same but using a piped input from an external filter script. 
-This is the most common case!</li>
+the same but using a piped input from an external filter script. This is the most common case!</li>
 </ul></dd>
 
 <dt>Indexing multiple files from pipe:</dt>
 <dd><span class="zue">joda -p database {word list from many files via pipe}</span>
 <ul>
 <li>database means the full path of the database without extension</li>
-<li>the word list is not a parameter, it is piped into joda (like the 3rd example above "-s"). 
-An external filter programm calls joda, pipelining the words of multi files 
-into it. The data stream needs to be separated by special chars per file/record:
-@f@FILENAME|DATESTAMP|INFOBYTE(s)|ID ist the startmark. At least, filename and 
-datestamp have to be set. If rather database records than files are used, use 
-a dot as filename. In this case the ID is needed. For infobytes and datestamp 
-informations please  see above under "-s".</li>
+<li>the word list is not a parameter, it is piped into joda (like the 3rd example above "-s"). An external filter programm calls joda, pipelining the words of multi files into it. The data stream needs to be separated by special chars per file/record: @f@FILENAME|DATESTAMP|INFOBYTE(s)|ID ist the startmark. At least, filename and datestamp have to be set. If rather database records than files are used, use a dot as filename. In this case the ID is needed. For infobytes and datestamp informations please see above under "-s".</li>
 </ul>
 
-<p>With one call, joda can be feeded with words from hundreds or thousands of 
-files. A Perl or Python script (or something similar) creates the word lists, 
-separated by the chars described above and calls joda. This is the most 
-performant kind of indexing, because joda as a binary executable is very 
-fast with its duties archiving and retrieving. But scripts written in Perl 
-or Python are more flexible for filtering purposes. So a combination of both 
-is most reliable.</p>
+<p>With one call, joda can be feeded with words from hundreds or thousands of files. A Perl or Python script (or something similar) creates the word lists, separated by the chars described above and calls joda. This is the most performant kind of indexing, because joda as a binary executable is very fast with its duties archiving and retrieving. But scripts written in Perl or Python are more flexible for filtering purposes. So a combination of both is most reliable.</p>
 
-<p>Alternativly you can use the next function, where directory scanning is done
-by joda, calling a filter program for each file:</p>
+<p>Alternativly you can use the next function, where directory scanning is done by joda, calling a filter program for each file:</p>
 </dd> 
 
 <dt>Indexing multiple files from a directory tree:</dt>
@@ -119,31 +65,19 @@ by joda, calling a filter program for each file:</p>
 <li>database means the full path of the database without extension</li>
 <li>filepath is the full path to the file(s) to be archived</li>
 <li>filepattern are the pattern of the file(s) to be archived</li>
-<li>timestamp is in format dd.mm.yyyy. In most cases this parameter is empty, 
-so the files datestamps (mtime) are used.</li>
-<li>word list(s) are created by an external program.
-This program is defined in the database config file ("execProg") or
-is called "arcfilter" by default. The programm may be a pipe or may 
-create a temporary file for data transfer, depending of the value of
-"tmpFile=" in the databases config file.  </li>
+<li>timestamp is in format dd.mm.yyyy. In most cases this parameter is empty, so the files datestamps (mtime) are used.</li>
+<li>word list(s) are created by an external program. This program is defined in the database config file ("execProg") or is called "arcfilter" by default. The programm may be a pipe or may create a temporary file for data transfer, depending of the value of
+"tmpFile=" in the databases config file.</li>
 </ul>
 
 <p class="i example">Examples:</i>
 <ul>     
 <li><tt>joda -a /var/archives/myarchiv /home/test/myfiles *.html 01.12.2003</tt><br>
-joda scans recursivly the given "filepath" and calls for every file which
-matched to the "filepattern" an external filter program. This can be written
-in Perl, Python or every other language. It has to return the word list as 
-described above by pipeline or temporary file. Because external filters
-parse the data format of the source (i.e. plain text, HTML, XML etc), this 
-makes joda flexible and independent from formats. </li>
+joda scans recursivly the given "filepath" and calls for every file which matched to the "filepattern" an external filter program. This can be written in Perl, Python or every other language. It has to return the word list as described above by pipeline or temporary file. Because external filters parse the data format of the source (i.e. plain text, HTML, XML etc), this makes joda flexible and independent from formats. </li>
 <li><tt>joda -a /var/archives/myarchiv /home/test/myfiles *.html</tt><br>
 Same as above, but for each file its own timestamp is used as jodas datestamp</li>
 </ul>
-<p>In most cases the "-p" function above is recommended because it needs only 
-one auxiliary system call (the joda call) in total and not one call for 
-every file to be archived. On the other hand, the "-a" call needs only a 
-very simple filter script without any other functionality.</p>
+<p>In most cases the "-p" function above is recommended because it needs only one auxiliary system call (the joda call) in total and not one call for every file to be archived. On the other hand, the "-a" call needs only a very simple filter script without any other functionality.</p>
 
 <p>See above (-s) for the structure of the word list.</p>
 </dd>    
@@ -152,14 +86,9 @@ very simple filter script without any other functionality.</p>
 <dd><span class="zue">joda -d database fileToDelete id {word list from file via filter prog}</span>
 <ul>
 <li>database means the full path of the database without extension.</li>
-<li>fileToDelete is the full path to the file which indexing in joda should be 
-erased. The file itself is not touched and has eventuelly to be deleted 
-manually.</li>
-<li>id is the joda identity key of the file, which it has received during
-archiving. Practically a master database or list has stored this information
-during the archiving process.</li>
-<li>word list(s) are created by an external program using a pipe or a temporary
-file (same procedure as described above under "-a")</li>
+<li>fileToDelete is the full path to the file which indexing in joda should be erased. The file itself is not touched and has eventuelly to be deleted manually.</li>
+<li>id is the joda identity key of the file, which it has received during archiving. Practically a master database or list has stored this information during the archiving process.</li>
+<li>word list(s) are created by an external program using a pipe or a temporary file (same procedure as described above under "-a")</li>
 </ul>
 <p class="i example">Example:</p>
 <ul class="none">
@@ -171,12 +100,8 @@ file (same procedure as described above under "-a")</li>
 <dd><span class="zue">joda -e database wordList id {word list from file}</span>
 <ul>  
 <li>database means the full path of the database without extension</li>
-<li>wordList is a LF (\n = character #10) separated list of the
-words to be deleted. For a complete deleting of a file entry it
-has to be the same list as formerly used for the archiving.</li>
-<li>id is the joda identity key of the file, which it has received during
-archiving. Practically a master database or list has stored this information
-during the archiving process.</li>
+<li>wordList is a LF (\n = character #10) separated list of the words to be deleted. For a complete deleting of a file entry it has to be the same list as formerly used for the archiving.</li>
+<li>id is the joda identity key of the file, which it has received during archiving. Practically a master database or list has stored this information during the archiving process.</li>
 </ul>
 <p class="i example">Example:</p>
 <ul class="none">   
@@ -201,13 +126,7 @@ to skip old entries while merging. Only available for bigger formats if the occu
 <li><tt>joda -m -verbose /var/archives/myarchiv_new /var/archives/myarchiv</tt></li>
 </ul>
 
-<p>Merge can be used for the optimization of a database. For this purpose, it 
-is sufficient, to create a copy (or softlink) of the source database config
-file as target config file. Now merge the existing database into the
-new (empty) one. The result is a perfect optimized copy of the source database,
-because now all equal words are (internally) pooled in one cluster. This will 
-minimize disk seeks, therefore improves retrieving speed and saves disk space.
-Recommended at least for for completed databases!</p>
+<p>Merge can be used for the optimization of a database. For this purpose, it is sufficient, to create a copy (or softlink) of the source database config file as target config file. Now merge the existing database into the new (empty) one. The result is a perfect optimized copy of the source database, because now all equal words are (internally) pooled in one cluster. This will minimize disk seeks, therefore improves retrieving speed and saves disk space. Strongly recommended at least for for completed databases (like archives).</p>
 
 </dd>
 
@@ -215,36 +134,17 @@ Recommended at least for for completed databases!</p>
 <dd><span class="zue">joda -q&nbsp;&nbsp; database query [from] [until] [fFilter] [maxHits] [sortOrder] [info]<br>
 joda -qu database query [from] [until] [fFilter] [maxHits] [sortOrder] [info]</span><br>
 <ul>
-<li>database means the full path of the database without extension
-<li>query is a word or a combination of words. Parenthesis and the logical
-operators can be used: AND, OR, NOT, and NEAR. It is possible to sharpen
-the query with word distance values after AND and NOT, i.e. AND.4 means 
-that only word hits are valid if the distance is maximum four words.
-Parenthesis should be used to clearify the context. Otherwise the search
-is done sequentially and the result may be not satisfying. Queries are
-always case insensitive.</li>
+<li>database means the full path of the database without extension </li>
+<li>query is a word or a combination of words. Parenthesis and the logical operators can be used: AND, OR, NOT, and NEAR. It is possible to sharpen the query with word distance values after AND and NOT, i.e. AND.4 means that only word hits are valid if the distance is maximum four words. Parenthesis should be used to clearify the context. Otherwise the search is done sequentially and the result may be not satisfying. Queries are always case insensitive.</li>
 <li>from: the earliest date the result should be from (give a dot "." for empty value)</li>
 <li>until: the latest the result should be from (dot ignores)</li>
-<li>fFilter is only available if joda uses file references (master mode, 
-see "preliminary remarks" above). In this case, parts of the filename of
-a indexed file could be used as filter while retrieving. Regular expressions
-can be used (see example below).</li>
-<li>bFilter is the bit filter in the range from 1 to 255. If it is set, the retrieved 
-words have to match the value exacetly. I.e. if you sets the value "1" for all words in an articels headline, you can retrieve those ones by using a bFilter=1. For a more sophisticated way of using bit filters, see below ("-x").</li>
-<li>maxHits means the maximum hit counter. Because joda sorts the results 
-internally, the user will see the most recent "maxHits" hits.</li>
-<li>sortOrder can be set to 1, 2 or 3. "1" means sorting by datestamp in the 
-first line and bny weight in the second line. "2" will sort by weight 
-(and secundary by time) and is the default if no value (or 0) ist given.
-"3" sorts in the first line by the info byte and in the second line by weight.</li>
+<li>fFilter is only available if joda uses file references (master mode, see "preliminary remarks" above). In this case, parts of the filename of a indexed file could be used as filter while retrieving. Regular expressions can be used (see example below).</li>
+<li>bFilter is the bit filter in the range from 1 to 255. If it is set, the retrieved  words have to match the value exacetly. I.e. if you sets the value "1" for all words in an articels headline, you can retrieve those ones by using a bFilter=1. For a more  sophisticated way of using bit filters, see below ("-x").</li>
+<li>maxHits means the maximum hit counter. Because joda sorts the results internally, the user will see the most recent "maxHits" hits.</li>
+<li>sortOrder can be set to 1, 2 or 3. "1" means sorting by datestamp in the first line and bny weight in the second line. "2" will sort by weight (and secundary by time) and is the default if no value (or 0) ist given. "3" sorts in the first line by the info byte and in the second line by weight.</li>
 </ul>
 
-<p>With -q(u) joda retrieves all files/records with matched the given
-query. The letter "u" means that the query is formatted in UTF-8. Otherwise
-the query has to be in the same ISO-8859-XX format like the archived words.
-If "u" is used, the value "charsettable" in the databases config file has to
-be set to one of the "8859_X.iso translation tables belonging to the joda
-distribution.</p>
+<p>With -q(u) joda retrieves all files/records with matched the given query. The letter "u" means that the query is formatted in UTF-8. Otherwise the query has to be in the same ISO-8859-XX format like the archived words. If "u" is used, the value "charsettable" in the databases config file has to be set to one of the "8859_X.iso translation tables  belonging to the joda distribution.</p>
 
 <p>The first two lines of jodas respone are always:
 <ul class="none">
@@ -252,12 +152,10 @@ distribution.</p>
 <li>Number of hits</li>
 <li>followed by a list of hits, separated by \n</li>
 </ul>
-<p>The format of the hits depends on the value of "fileref" in the database
-configuration file. Working with filenames (a *.ref file exists), joda answers:</p>
+<p>The format of the hits depends on the value of "fileref" in the database configuration file. Working with filenames (a *.ref file exists), joda answers:</p>
 <ul class="none">
 <li>filename &middot; title &middot; id &middot; datestamp &middot; weight &middot; infobyte<br>
-where "title" is coming from meta information if file refence list is used
-(see above "-s").</li>
+where "title" is coming from meta information if file refence list is used (see above "-s").</li>
 </ul>
 <p>Without file ref joda will answer per hit:</p>
 <ul class="none">
@@ -268,42 +166,34 @@ where "title" is coming from meta information if file refence list is used
 means \t (character #9)!</p>
 <p class="i example">Query examples:</i>
 <ul>
-<li><tt>joda -q Bill</tt><br>
+<li><tt>joda -q database  Bill</tt><br>
 finds all files/records with "Bill"</li>
-<li><tt>joda -q Bill*</tt><br>
-find all occurences if "Bill", Billy", "Billard" etc. "*" is a wildcard 
-which set only at the tail of a word.</li>
-<li><tt>joda -q "Bill Clinton"</tt><br>
-finds all files/records where Bill and Clinton are in. Same as "Bill AND Clinton"
-or "Bill&Clinton"</li>
-<li><tt>joda -q "'Bill Clinton'"</tt><br>
-is equal to "Bill AND.1 Clinton" and "Bill&.1Clinton". Word distance must be one
-word in the file.</li>
-<li><tt>joda -q "(Bill or Hillary) and.1 Clinton"</tt><br>
+<li><tt>joda -q database  Bill*</tt><br>
+find all occurences if "Bill", Billy", "Billard" etc. "*" is a wildcard which set only at the tail of a word.</li>
+<li><tt>joda -q database  "Bill Clinton"</tt><br>
+finds all files/records where Bill and Clinton are in. Same as "Bill AND Clinton" or "Bill&Clinton"</li>
+<li><tt>joda -q database  "'Bill Clinton'"</tt><br>
+is equal to "Bill AND.1 Clinton" and "Bill&.1Clinton". Word distance must be one word in the file.</li>
+<li><tt>joda -q database  "(Bill or Hillary) and.1 Clinton"</tt><br>
 finds all "Bill Clinton" and "Hillary Clinton" but not "Christopher Clinton"</li>
-<li><tt>joda -q "((Bill or Hillary) and.1 Clinton) not Bush"</tt><br>
-find all "Bill Clinton" and "Hillary Clinton" but the word Bush must be missed
-in the article.</li>
-<li><tt>joda -q "Barney NEAR Flintstone*"</tt><br>
-finds all Barneys and Flintstone(s) if the word distance of both words is less or 
-equal to 50. Equal to AND.50. For sharpening the query.</li>
-<li><tt>joda -q "Barney NEAR Flintstone*" 01.01.2002 31.12.2003</tt><br>
-The text with Barneys and the Flintstones has to be last modified (or stored) in 
-2003. Only available if joda handles datestamps (see above). Especially designed 
-for running joda as stand alone database, but can make sense in slave mode to.</li>
-<li><tt>joda -q "Barney NEAR Flintstone*" . . /home/comics</tt><br>
+<li><tt>joda -q database  "((Bill or Hillary) and.1 Clinton) not Bush"</tt><br>
+find all "Bill Clinton" and "Hillary Clinton" but the word Bush must be missed in the article.</li>
+<li><tt>joda -q database  "Barney NEAR Flintstone*"</tt><br>
+finds all Barneys and Flintstone(s) if the word distance of both words is less or equal to 50. Equal to AND.50. For sharpening the query.</li>
+<li><tt>joda -q database  "Barney NEAR Flintstone*" 01.01.2002 31.12.2003</tt><br>
+The text with Barneys and the Flintstones has to be last modified (or stored) in 2003. Only available if joda handles datestamps (see above). Especially designed for running joda as stand alone database, but can make sense in slave mode to.</li>
+<li><tt>joda -q database  "Barney NEAR Flintstone*" . . /home/comics</tt><br>
 The filename has to match "/home/comics". If not joda skips the hit.
 The two dots means "no start date" and "no end date" given.</li>
-<li><tt>joda -q "Barney NEAR Flintstone*" . . REGEX=^/var/www/doc/index.html?$</tt><br>
+<li><tt>joda -q database  "Barney NEAR Flintstone*" . . REGEX=^/var/www/doc/index.html?$</tt><br>
 The filename has to match the regular expression. </li>
-<li><tt>joda -q "Barney NEAR Flintstone*" . . . 50</tt><br>
+<li><tt>joda -q database  "Barney NEAR Flintstone*" . . . 50</tt><br>
 Maximum of 50 hits will be shown. Default is 100.</li>
-<li><tt>joda -q "Barney NEAR Flintstone*" . . . . 1</tt><br>
+<li><tt>joda -q database  "Barney NEAR Flintstone*" . . . . 1</tt><br>
 Sorting order is "by time" instead of "by weight".</li>
-<li><tt>joda -q "Barney NEAR Flintstone*" . . . . . 1</tt><br>
-Either Barney or Flintstones has to be flagged with info bitvalue 1 
-(ie. must be headline words). In a -q query, a bFilter value of Zero 
-means "undefined" and matches all stored values.</li>
+<li><tt>joda -q database  "Barney NEAR Flintstone*" . . . . . 1</tt><br>
+Both Barney and Flintstones have to be flagged with info bitvalue 1 
+(ie. must be headline words). In a -q query, a bFilter value of Zero means "undefined" and matches all stored values.</li>
 </ul>
 </dd>
 <br>
@@ -317,11 +207,16 @@ joda -xu database query [from] [until] [fFilter] [bFilter] [maxHits] [sortOrder]
 </dd>
 </dl>
 
-<table width="100%" style="border: 1px dotted gray"><tr>
-<td align="left" with="35%">&laquo;<a href="joda_intro.html">Introduction to the Interface documentation</a></td>
-<td align="center" width="30%"><a href="index.html">Home</a></td>
-<td align="right" width="35%"><a href="jodad_interface.html">Interface of the server program jodad</a>&raquo;</td>
+<table width="100%" class="navtable"><tr>
+<td width="20%"><a href="index.html">&bull; Home</a></td>
+<td width="20%"><a href="joda_intro.html">&bull; Introduction</a></td>
+<td width="20%">&bull; joda Program</td>
+<td width="20%"><a href="jodad_interface.html">&bull; jodad Server</a></td>
+<td width="20%"><a href="http://sourceforge.net/projects/ioda/">&bull; Project Page</a></td>
 </tr></table>
+<div align="center" style="margin-top:8px">
+<a href="http://sourceforge.net/"><img src="http://sourceforge.net/sflogo.php?group_id=118405&amp;type=4" width="125" height="37"  border="0" alt="SourceForge.net Logo" /></a>
+</div>
 
 </BODY>
 </HTML>

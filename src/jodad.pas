@@ -23,12 +23,12 @@ Program JodaD;
 }
 
 (* Copyright (C) 1994-2004  jo@magnus.de
-   This library is free software; you can redistribute it and/or modify it 
+   This program is free software; you can redistribute it and/or modify it 
 	under the terms of the GNU Lesser General Public License as published by
 	the Free Software Foundation; either version 2.1 of the License, or 
 	(at your option) any later version.
 
-   This library is distributed in the hope that it will be useful, but 
+   This program is distributed in the hope that it will be useful, but 
 	WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY 
 	or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public 
 	License for more details.
@@ -44,7 +44,7 @@ uses
 {$H+}
 
 const
-	version				=	'3.1';
+	version				=	'3.2';
 	defaultLogbook		=	'/var/log/apps/jodad.log';
 	defaultRcvLen		:	longint	=	$10000;		// aus Sicherheitsgründen: max. Transfervolumen für ankommende Jobs
 	jodaDefaultSocket	: 	word		=	  3359;

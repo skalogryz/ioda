@@ -1,4 +1,4 @@
-UNIT OccTable2;
+UNIT OccTable3;
 { 
 	stellt ein Hilfsobjekt für das Volltextobjekt zur Verfügung.
 	Zusammen mit einem Bayerbaum eingesetzt, speichert es alle Vorkommen eines	Strings.
@@ -30,38 +30,32 @@ uses
 	
 const
 	defCluster	=	2;    		               // min. Voll-Einträge/Cluster
-	startContReadLen	= 512; 		   			// Anzahl Byte pro weiterem Lesezugriff (erster Zugriff siehe Constructor 'def1stReadLen')
 	maxCluster	= 8192;                       // max. Voll-Einträge/Cluster
 	largestOccLen=12;									// derzeit maximal 12-Byte OccLen
-	maxClusterLen=maxCluster*largestOccLen;	// größtmögliche Clusterlänger in Byte
-	cluDaLen	:	array[boolean] of cardinal = (4,8);
-	escMask	:	array[boolean] of cardinal = ($C0000000,$40000000);
 
 type
-{ Bedeutung der Bits 31 und 30: 
-		erstes DWord in der ersten und zweiten (nicht dritten!) Variante des Records "TOccl":
-			01: ID, 
-			10: in erster ID = full flag (ergibt zusammen mit ID-Flag => 11), 
-			10: an Stelle einer nachfolgenden ID: len flag (bleibt 10)
-		im Gewicht:
+{ Bedeutung der Bits 0 und 1: 
+		erstes Word (ID bzw. LEN)
+			01: ID 
+			11: ID mit full flag (wird nur in erster ID gesetzt) 
+			10: len flag
+		vorletztes Word: (Pos);
 			10: last flag 
 
 		Cluster können zwei Zustände haben:
-			In VOLLEN Clustern ist das full flag (11 bei erster ID) und das last flag (letztes Gewicht) gesetzt,
+			In VOLLEN Clustern ist das full flag (11 bei erster ID) und das last flag (letzte Pos) gesetzt,
 			SONST ist das len-Flag (am Beginn des freien Platzes) gesetzt.
-			Bei leer gelöschten Clustern ist das len Flag am Anfang des RecordArrays mit 10 geflaggt
-			
 }
-	occElType 	= (OID,ODATA,OMOREDATA,OLEN);
+
+	occElType 	= (OID,OMOREDATA,ODATA,OLEN);
 	TOccEl =	packed record
 		case occElType of								
 		   OID	:     (id		:  cardinal);  //  0-3FFFFFFh (1G)
-		   ODATA :     (pos		:	word;
-							 info,
-		   			    gewicht	:  byte); 		//  0-3F 		(64)
-		   OMOREDATA:  (datum,
-		   			    moreInfo:  word);
-		   OLEN  :     (clen 	:  cardinal);
+		   OMOREDATA:  (datum,						//  0-FFFFh	  (64K)
+		   			    moreInfo:  word);		//  0-FFFFh	  (64K)
+		   ODATA :     (info,						//  0-FFFFh	  (64K)
+							 pos		:	word);		//  0-3FFFh   (16K)
+		   OLEN  :     (clen 	:  cardinal);	//  0-3FFFFFFh (1G)
 	end;
 	POccEl = ^TOccEl;
 	
@@ -89,7 +83,7 @@ type
 		class function Open(name:string; elSize,initSize,growSize:longint; readOnly,enableRecycling:boolean; var res:integer):TClusterMaster;
 		constructor Create(const name:string; elSize:longint; readOnly,enableRecycling:boolean; var res:integer);
 		destructor  Destroy; OVERRIDE;
-		function    InsertRecord(var key:cardinal; size,elID,elPos,elDate,elWeight,elInfo:cardinal):integer; VIRTUAL; ABSTRACT;
+		function    InsertRecord(var key:cardinal; size,elID,elPos,elDate,elInfo:cardinal):integer; VIRTUAL; ABSTRACT;
 		function    GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean):longint; VIRTUAL; ABSTRACT;
 		function 	GetItemCount(key:cardinal):longint; VIRTUAL;
 		function 	InvalidateRecord(key,fid:cardinal):longint; VIRTUAL; ABSTRACT;
@@ -117,7 +111,7 @@ type
 		function		GetResult(i:integer):TDW;
 		function 	GetCount:integer;
 		procedure	GetData(p:PByte; var r:cardinal);
-		procedure  	GetItem(p:PByte; var last:boolean; var i,r,id:cardinal; callback:TTraverse);
+		procedure 	GetItem(p:PByte; var last:boolean; var i,r,id,datum,info:cardinal; callback:TTraverse; resi:TDWList);
 		procedure 	SetContReadLen(len:cardinal);
 		procedure 	CallbackNOP(elID,elPos,elDat,elWeight,elInf:cardinal); // Beispiel eines Callbacks
 		
@@ -130,7 +124,7 @@ type
 	TClusterMasterD	=	class(TClusterMaster)
 		constructor Create(const name:string; elSize:longint; readOnly,enableRecycling:boolean; var res:integer);
 		destructor  Destroy; OVERRIDE;
-		function    InsertRecord(var key:cardinal; size,elID,elPos,elDate,elWeight,elInfo:cardinal):integer; OVERRIDE;
+		function    InsertRecord(var key:cardinal; size,elID,elPos,elDate,elInfo:cardinal):integer; OVERRIDE;
 		function    GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean):longint; OVERRIDE;
 		function 	InvalidateRecord(key,fid:cardinal):longint; OVERRIDE;
 		
@@ -150,6 +144,18 @@ IMPLEMENTATION
 type
 	EFWrongFileType=	class(Exception);
 
+const
+	startContReadLen	= 512; 		   			// Anzahl Byte pro weiterem Lesezugriff (erster Zugriff siehe Constructor 'def1stReadLen')
+	dwIsID				= $00000001;
+	dwIsLen				= $00000002;
+	dwIsFull				= $00000002;
+	dwIsIDInFullCluster = $00000003;
+	wIsID					= $0001;
+	wIsLast				= $0002;
+	wIsLen				= $0002;
+	maxClusterLen=maxCluster*largestOccLen;	// größtmögliche Clusterlänger in Byte
+	cluDaLen	:	array[boolean] of cardinal = (4,8);
+	escMask	:	array[boolean] of cardinal = (dwIsIDInFullCluster,dwIsID);
 
 // Klassenmethoden:
 
@@ -214,7 +220,6 @@ begin
 			occStream.Seek(0,soFromBeginning);
 			occStream.WriteDWord(occLen);
 		end;
-		resList:=TDWList.Create(maxlongint);
 		
 	except
 		on EFWrongFileType do res:=301;
@@ -302,45 +307,46 @@ begin
 end;
 
 
-procedure TClusterMaster.GetItem(p:PByte; var last:boolean; var i,r,id:cardinal; callback:TTraverse);
+procedure TClusterMaster.GetItem(p:PByte; var last:boolean; var i,r,id,datum,info:cardinal; callback:TTraverse; resi:TDWList);
 var
-	pos,datum,gewicht,info,hiInfo	:	longint;
+	pos,gewicht,hiInfo	:	cardinal;
 begin
 	last:=true;
-
 	if id=0 then begin
 		if i+occLen>r then begin
-			GetData(p,r);
-			if i+occLen>r then EXIT;				// nicht genug Daten vorhanden
+			GetData(p,r); if i+occLen>r then EXIT;		// nicht genug Daten vorhanden
 		end;
-		id:=POccEl(p+i)^.id and $3FFFFFFF;		// flags ausfiltern
+		id:=POccEl(p+i)^.id shr 2;				// flags ausfiltern
+		if occLen>8 then begin					// datum & info werden nur beim ersten Wort gespeichert!
+			datum:=POccEl(p+i+4)^.datum;
+			if occLen>10 then 
+				hiInfo:=POccEl(p+i+4)^.moreInfo shl 16 
+			else
+				hiInfo:=0;
+		end else begin
+			datum:=0;
+			hiInfo:=0;
+		end;
+		i+=occLen-4;
+		pos:=  POccEl(p+i)^.pos shr 2;
+		last:= POccEl(p+i)^.pos and wIsLast<>0;
+		info:= (POccEl(p+i)^.info) or hiInfo;
 		i+=4;
 	end else begin
-		if i+occLen-4>r then begin
-			GetData(p,r);
-			if i+occLen-4>r then EXIT;				// nicht genug Daten vorhanden
+		if i+2>r then begin
+			GetData(p,r); if i+2>r then EXIT;// nicht genug Daten vorhanden
 		end;
+		pos:=  PWord(p+i)^ shr 2;
+		last:= PWord(p+i)^ and wIsLast<>0;
+		i+=2;
 	end;	
-	
-	pos:= 	 POccEl(p+i)^.pos;
-	info:=	 POccEl(p+i)^.info; 
-	gewicht:= POccEl(p+i)^.gewicht and $3F;
-	last:=	 POccEl(p+i)^.gewicht and $80<>0;
-	if occLen>8 then begin
-		datum:=POccEl(p+i+4)^.datum;
-		if occLen>10 then begin
-			hiInfo:=POccEl(p+i+4)^.moreInfo;
-			info:=(hiInfo shl 8) or info;
-		end;
-	end else
-		datum:=0;
 
+	if pos<500 then gewicht:=500-pos else gewicht:=0;
 	if callback<>NIL then 
 		Callback(id,pos,datum,gewicht,info)
-	else if resList<>NIL then 
-		resList.Add([id,pos,datum,gewicht,info]);// wenn weder Callback noch resList definiert sind, wird nur gezählt
+	else if resi<>NIL then 
+		resi.Add([id,pos,datum,gewicht,info]);
 
-	i+=occLen-4;
 	if i+4>r then GetData(p,r);
 	last:=last or (i+4>r)
 end;
@@ -399,47 +405,45 @@ begin
 end;
 
 
-function TClusterMasterD.InsertRecord(var key:cardinal; size,elID,elPos,elDate,elWeight,elInfo:cardinal):integer;
+function TClusterMasterD.InsertRecord(var key:cardinal; size,elID,elPos,elDate,elInfo:cardinal):integer;
 var	 														// Result<0 für Fehler, 0 für o.k. 
-	idEl,datEl,moreDatEl					:	TOccEl;
+	idEl,datEl,moreDatEl						:	TOccEl;
 	i,j,len,r,lastI,aktKey,tmpKey,
-	newKey,dw,nextCluster,id,lastID	:	cardinal;
-	p											:	PByte;
-	isFull,dirty							:	boolean;
+	newKey,nextCluster,lastID,lastInfo	:	cardinal;
+	p												:	PByte;
+	w												:	word;
+	isFull,dirty,repeater					:	boolean;
 
 begin
 	result:=0; lastI:=0; lastID:=0; dirty:=false;
-	size:=size and $3FFF;							// size kann maximal 16383 sein
+	size:=size and $3FFF;						// size kann maximal 16383 sein
 	// Daten zunächst auf drei Record-Varianten (jeweils DWords) verteilen:
-	id:=elID and $3FFFFFFF;							// reine ID 
-	idEl.id:=id or $40000000; 						// ID-Flag setzen
-	with datEl do begin
-		pos   	:= elPos and $FFFF;
-		info  	:= elInfo and $FF;
-		gewicht	:= (elWeight and $3F);	 		// ID-Flag löschen, full-flag löschen
-	end;
+	idEl.id:=(elID shl 2) or dwIsID;		// ID-Flag setzen
 	with moreDatEl do begin
-		datum		:= elDate and $FFFF;
-		moreInfo := (elInfo and $FFFF00) shr 8;
+		datum		:= elDate;
+		moreInfo := elInfo shr 16;
+	end;
+	if elPos>$3FFF then elPos:=0;			// keine Wortpositionen > 16383 möglich
+	with datEl do begin
+		info  	:= elInfo and $FFFF;
+		pos   	:= elPos shl 2;			// Platz für Flags schaffen
 	end;
 
 	if size>maxCluster then	size:=maxCluster else if size=0 then size:=defCluster;
 	try
-		if key=0 then begin							// FALL 1: neues Wort, Erstcluster anlegen
+		if key=0 then begin						// FALL 1: neues Wort, Erstcluster anlegen
 			key:=NewCluster(size,true);
 			if size=1 then begin
-				idEl.id:=idEl.id or $80000000;	// full flag setzen 
-				datEl.gewicht:=datEl.gewicht or $80; // last-Flag setzen
+				idEl.id:=idEl.id or dwIsFull;// full flag setzen 
+				datEl.pos:=datEl.pos or wIsLast;// last-Flag setzen
 			end;
 			fillWord(firstOcc^,(8+occLen*size) shr 1,0);
 			with firstOcc^ do begin
 				occs[0]:=idEL;
-				occs[1]:=datEl;
-				if occLen>8 then occs[2]:=moreDatEl;
-				if size>1 then begin
-					p:=@occs; 
-					PoccEl(p+occLen)^.clen:=size or $80000000;	// len mit len flag setzen
-				end;
+				if occLen>8 then occs[1]:=moreDatEl;
+				p:=@occs; 
+				POccEl(p+occLen-4)^:=datEl;
+				if size>1 then PoccEl(p+occLen)^.clen:=(size shl 2) or dwIsLen;	// len mit len flag setzen
 			end;
 			occStream.Seek(key,soFromBeginning);
 			occStream.Write(firstOcc^,8+occLen*size);	// neuen Cluster wegen Dateilänge unbedingt komplett abspeichern
@@ -450,72 +454,78 @@ begin
 
 		if firstOcc^.last=0 then with firstOcc^ do begin
 			aktKey:=key;
-		  	isFull:=occs[0].id and $C0000000=$C0000000; // ID *und* full flag müssen gesetzt sein
+		  	isFull:=occs[0].id and dwIsIDInFullCluster=dwIsIDInFullCluster; // ID *und* full flag müssen gesetzt sein
 			nextCluster:=next;
 			p:=@occs;
 		end else with occ^ do begin
-			aktKey:=firstOcc^.last;					// letzten Knoten laden
+			aktKey:=firstOcc^.last;				// letzten Knoten laden
 			occStream.Seek(aktKey,soFromBeginning);
-			occStream.Read(occ^,4+def1stReadLen);// zunächst nur maximal 512 Byte lesen
-			isFull:=occs[0].id and $C0000000=$C0000000;
+			occStream.Read(occ^,4+def1stReadLen);
+		  	isFull:=occs[0].id and dwIsIDInFullCluster=dwIsIDInFullCluster;
 			nextCluster:=next;
 			p:=@occs;
 		end;
+		
 		if not isFull then begin
-			len:=0; i:=0; r:=def1stReadLen;		// nach dem Ende des teilvollen Cluster suchen
+			len:=0; i:=0; r:=def1stReadLen;	// nach dem Ende des teilvollen Cluster suchen
 			while ((len=0) and (i<fullClusterLen)) do begin
-				if i+4>r then begin
-					GetData(p,r);						//	Daten nachladen
-					if i+4>r then begin				// sollte nicht vorkommen: zu wenig Daten vorhanden	
-						result:=-305; EXIT
-					end;
+				if i+4>r then begin				// +4 muss vorhanden sein, weil Cluster hier nicht voll sein kann (not isFull!)
+					GetData(p,r); if i+4>r then begin result:=-305; EXIT; end;	// sollte nicht vorkommen: zu wenig Daten vorhanden
 				end;
-
-				dw:=POccEl(p+i)^.id and $C0000000;
-				if dw=$40000000 then begin			//	is ID
-					lastID:=POccEl(p+i)^.id and $3FFFFFFF; // id merken (falls gleiche ID)
-					lastI:=i+4;							// Zeiger auf letztes datEl (Gewicht) merken (für ev. last flag unten)
-					i+=occLen							// um occLen (8,10 oder 12 Bytes) weitergehen				
-				end else if dw=$80000000 then begin	// $C0000000 (id+full flag) kommt hier nicht vor (not isFull...)
-					len:=POccEl(p+i)^.clen and $3FFFFFFF; // len flag gefunden
+				
+				w:=PWord(p+i)^ and $0003;		// zum Bit-Test wird nur ein Word benutzt (Flags in lsb und lsb+1)
+				if w=wIsID then begin			//	is ID
+					lastID:=POccEl(p+i)^.id shr 2;// id merken (falls gleiche ID)
+					lastI:=i+occLen-2;			// Zeiger auf letzte pos (Wordptr!) merken (für ev. last flag unten)
+					if i+occLen-4>r then begin	
+						GetData(p,r); if i+occLen-4>r then begin result:=-305; EXIT; end;	// sollte nicht vorkommen: zu wenig Daten vorhanden
+					end;
+					lastInfo:=POccEl(p+i+occLen-4)^.info; // info für Vergleich unten merken
+					if occLen>10 then lastInfo:=lastInfo or (POccEl(p+i+4)^.moreInfo shl 16);
+					i+=occLen						// um occLen (8,10 oder 12 Bytes) weitergehen				
+				end else if w=wIsLen then begin// dwIsIDInFullCluster (id+full flag) kommt hier nicht vor (not isFull...)
+					len:=POccEl(p+i)^.clen shr 2;// len flag gefunden
 					BREAK
 				end else begin	
-					lastI:=i;							// wie oben letztes DatEl für ev. last flag merken
-					i+=occLen-4;						// is data=> um 4,6 oder 8 Bytes weiter bis wenigstens Bit=$40000000 gesetzt ist								
+					lastI:=i;						// wie oben letztes datEl für ev. last flag merken
+					i+=2;
 				end;
 			end;
 			if (len=0) or (len>maxCluster) or (i>=len*occLen) then begin result:=-306; EXIT; end;	// Fehler: Keine sinnvolle Längenangabe gefunden
-			SetContReadLen(len);						// Leselänge per Statistik optimieren
-			j:=occLen;									// 8-12 Byte Platzbedarf
-			if id=lastID then j-=4;					// Wiederholung der ID (4 Byte) kann bei sortierter Einfügung Gleicher entfallen
+			SetContReadLen(len);					// Leselänge per Statistik optimieren
+			
+			repeater:=(elID=lastID) and (elInfo=lastInfo);
+			if repeater then j:=2 else j:=occLen;	// Wiederholung: nur Pos eintragen
 			if i+j > len*occLen then begin
-				POccEl(p+lastI)^.gewicht:=POccEl(p+lastI)^.gewicht or $80; // last flag in letztem Gewicht setzen
-				POccEl(p)^.id:=POccEl(p)^.id or $80000000; // full flag in erster ID setzen (=> $C0000000)
-				POccEl(p+i)^.clen:=0;				// Längen-DWord löschen
+				PWord(p+lastI)^:=PWord(p+lastI)^ or wIsLast; // last flag in letzter Pos setzen
+				POccEl(p)^.id:=POccEl(p)^.id or dwIsFull; // full flag in erster ID setzen
+				POccEl(p+i)^.clen:=0;			// Längen-DWord löschen
 				i+=4;
-				isFull:=true;							// verbleibender Platz reicht nicht aus - Platz bleibt leer => neuen Cluster anlegen (s.u.)
-				dirty:=true;							// Record muss komplett abgespeichert werden
+				isFull:=true;						// verbleibender Platz reicht nicht aus - Platz bleibt leer => neuen Cluster anlegen (s.u.)
+				dirty:=true;						// Record muss komplett abgespeichert werden
 			end else begin
-				if id<>lastID then begin
-					POccEl(p+i)^:=idEl; i+=4;		// Wort aus anderem Text: ID muss gesetzt werden				
-				end;
-				lastI:=i;								// index für mögliches last flag merken
-				POccEl(p+i)^:=datEl; i+=4;
-				if occLen>8 then begin
-					POccEl(p+i)^:=moreDatEl; 
-					i+=occLen-8;
+				if not repeater then begin
+					POccEl(p+i)^:=idEl; 			// Wort aus anderem Text: kompletten Record setzen
+					if occLen>8 then POccEl(p+i+4)^:=moreDatEl;
+					POccEl(p+i+occLen-4)^:=datEl;
+					i+=occLen;
+					lastI:=i-2;						// index für mögliches last flag merken					
+				end else begin
+					PWord(p+i)^:=datEl.pos;		// beim Wiederholer wird nur pos eingetragen (Word = 2 Byte)
+					lastI:=i;						// dto.
+					i+=2;
 				end;
 
-				if i+occLen-4<=len*occLen then begin // es verbleibt noch Platz für mindestens einen weiteren Eintrag
-					POccEl(p+i)^.clen:=len or $80000000; // len flag im ersten noch unbenutzten Eintrag vermerken
-					i+=4;									// um Länge der Länge (4) zum Schreiben erhöhen
-				end else begin							// sonst im ersten Eintrag das Flag "voll" setzen
-					POccEl(p+lastI)^.gewicht:=POccEl(p+lastI)^.gewicht or $80; 	// last flag setzen
-					POccEl(p)^.id:=POccEl(p)^.id or $80000000;	// full Flag in der ersten ID setzen. Zum Platz-Optimieren siehe unten ¹)
+				if i+4<=len*occLen then begin // es verbleibt noch Platz für mindestens einen weiteren (Längen-) Eintrag
+					POccEl(p+i)^.clen:=(len shl 2) or dwIsLen; // len flag im ersten noch unbenutzten Eintrag vermerken
+					i+=4;								// um Länge der Länge (DWord = 4 Byte) zum Schreiben erhöhen
+				end else begin						// sonst im ersten Eintrag das Flag "voll" setzen
+					PWord(p+lastI)^:=PWord(p+lastI)^ or wIsLast; 	// last flag setzen
+					POccEl(p)^.id:=POccEl(p)^.id or dwIsFull;	// full Flag in der ersten ID setzen. Zum Platz-Optimieren siehe unten ¹)
 				end;
 				occStream.Seek(aktKey+cluDaLen[aktKey=key],soFromBeginning); // FÄLLE 2+3: freien Platz im Erst- bzw. ContCluster gefunden
-				occStream.Write(p^,i);				// Occs abspeichern
-				EXIT										// und fertig
+				occStream.Write(p^,i);			// Occs abspeichern
+				EXIT									// und fertig
 			end;
 		end;
 
@@ -524,7 +534,7 @@ begin
 			if (recycling) and (nextCluster<>0) then begin	// auch in nicht-letzten Clustern soll Platz aus gelöschten Einträgen recycled werden
 				if dirty then begin					// ggf. zunächst die oben geänderten Daten (full+last flags) speichern
 					occStream.Seek(aktKey+cluDaLen[aktKey=key],soFromBeginning);
-					occStream.Write(p^,i);			// Records (hier ohne Header) soweit beschrieben abspeichern
+					occStream.Write(p^,i);		// Records (hier ohne Header) soweit beschrieben abspeichern
 					dirty:=false;
 				end;
 				
@@ -532,58 +542,56 @@ begin
 					tmpKey:=nextCluster;
 					occStream.Seek(tmpKey,soFromBeginning);
 					occStream.Read(tmpOcc^,4+occLen); // nur Header und ersten Record lesen
-					if (tmpOcc^.occs[0].id and $C0000000<>$C0000000) then
+					if tmpOcc^.occs[0].id and dwIsIDInFullCluster<>dwIsIDInFullCluster then
 						isFull:=false
 					else
 						nextCluster:=tmpOcc^.next
 				end;
 				if isFull then begin
-					occ^:=tmpOcc^;						// für next-Verzeigerung unten den letzten Record aus der Kette benutzen!
+					occ^:=tmpOcc^;					// für next-Verzeigerung unten den letzten Record aus der Kette benutzen!
 					aktKey:=tmpKey;
 				end else begin
 					firstOcc^.last:=nextCluster;	// last-Zeiger auf den oben gefundenen, teil-freien Cluster setzen
 					occStream.Seek(key,soFromBeginning);
 					occStream.Write(firstOcc^,4); // nur den last-Zeiger speichern und dann Rekursion aufrufen
-					result:=InsertRecord(key,size,elID,elPos,elDate,elWeight,elInfo); // hier läuft es dann auf Fall 3 hinaus
-					EXIT									// Ende nach Rekursion
+					result:=InsertRecord(key,size,elID,elPos,elDate,elInfo); // hier läuft es dann auf Fall 3 hinaus
+					EXIT								// Ende nach Rekursion
 				end;
 			end;
 			
 			newKey:=NewCluster(size,false);
-			if aktKey=key then 						// aktueller ist Erstcluster
-				firstOcc^.next:=newKey				// also Vorwärtszeiger dort setzen
-			else begin									// aktueller (occ @ aktKey) ist Fortsetzungscluster
-				occ^.next:=newKey;					// Vorwärtszeiger im Vorgänger-Cluster setzen
+			if aktKey=key then 					// aktueller ist Erstcluster
+				firstOcc^.next:=newKey			// also Vorwärtszeiger dort setzen
+			else begin								// aktueller (occ @ aktKey) ist Fortsetzungscluster
+				occ^.next:=newKey;				// Vorwärtszeiger im Vorgänger-Cluster setzen
 				occStream.Seek(aktKey,soFromBeginning);
 				if dirty then begin
-					occStream.Write(occ^,4+i);		// Cluster komplett abspeichern (ggf. oben flags verändert) 
+					occStream.Write(occ^,4+i);	// Cluster komplett abspeichern (ggf. oben flags verändert) 
 					dirty:=false;
 				end else
-					occStream.Write(occ^,4);		// nur dessen "next"-Feld abspeichern 
+					occStream.Write(occ^,4);	// nur dessen "next"-Feld abspeichern 
 			end;
 
-			firstOcc^.last:=newKey;					// neuen last-Zeiger im Erstcluster setzen
+			firstOcc^.last:=newKey;				// neuen last-Zeiger im Erstcluster setzen
 			occStream.Seek(key,soFromBeginning);
 			if dirty then begin
-				occStream.Write(firstOcc^,8+i); 	// Cluster komplett abspeichern (full flag s.o.)
+				occStream.Write(firstOcc^,8+i);// Cluster komplett abspeichern (full flag s.o.)
 				dirty:=false
 			end else
-				occStream.Write(firstOcc^,8);		// nur dessen "last" und "next"-Felder abspeichern
+				occStream.Write(firstOcc^,8);	// nur dessen "last" und "next"-Felder abspeichern
 
 			if size=1 then begin
-				idEl.id:=idEl.id or $80000000; 	// full flag setzen (=> $C0000000)
-				datEl.gewicht:=datEl.gewicht or $80; // last flag setzen
+				idEl.id:=idEl.id or dwIsFull;// full flag setzen 
+				datEl.pos:=datEl.pos or wIsLast;// last-Flag setzen
 			end;
 			fillWord(occ^,(4+occLen*size) shr 1,0);
 			with occ^ do begin
 				occs[0]:=idEL;
-				occs[1]:=datEl;
-				if occLen>8 then 	occs[2]:=moreDatEl;
-				if size>1 then begin
-					p:=@occs; 
-					PoccEl(p+occLen)^.clen:=size or $80000000;// len flag setzen
-				end;
-			end;				
+				if occLen>8 then occs[1]:=moreDatEl;
+				p:=@occs; 
+				POccEl(p+occLen-4)^:=datEl;
+				if size>1 then POccEl(p+occLen)^.clen:=(size shl 2) or dwIsLen;	// len mit len flag setzen
+			end;
 			occStream.Seek(newKey,soFromBeginning);
 			occStream.Write(occ^,4+occLen*size);// neuen Cluster wegen Dateilänge unbedingt komplett abspeichern
 		end;												// Fall 4 ist fertig
@@ -595,17 +603,20 @@ end;
 
 function TClusterMasterD.GetItemList(key:cardinal; callback:TTraverse; countOnly:boolean):longint;
 var
-	p								:	PByte;
-	i,id,r,aktKey,firstKey	:	cardinal;
-	l								:	longint;
-	n								:	integer;
-	last,isFull					:	boolean;
+	p												:	PByte;
+	i,id,r,aktKey,firstKey,datum,info	:	cardinal;
+	l												:	longint;
+	n												:	integer;
+	last,isFull									:	boolean;
 	
 begin
 	n:=0; firstKey:=key;
-	if (callback=NIL) and not (countOnly) then begin
+	if (callback<>NIL) or (countOnly) then begin
+		resList.Free; resList:=NIL;
+	end else begin
 		if resList=NIL then resList:=TDWList.Create(maxlongint) else resList.Clear;
 	end;
+	
 	while key>0 do 
 	try
 		aktKey:=key;
@@ -630,13 +641,13 @@ begin
 		end;
 		
 		i:=0; last:=false; r:=def1stReadLen;
-		isFull:=POccel(p)^.id and $C0000000=$C0000000;
+		isFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster;
 		while not last do begin
-			if (POccel(p+i)^.id and $40000000<>0) then begin	//	nicht bei len flag ($80000000)
+			if (POccel(p+i)^.id and dwIsID<>0) then begin	//	nicht bei len flag (dwIsLen)
 				id:=0; 
 				repeat
 //write(firstKey:10,id:10);
-					GetItem(p,last,i,r,id,callback);	inc(n); 
+					GetItem(p,last,i,r,id,datum,info,callback,resList); inc(n); 
 //writeln(' => ',id:10,i:10,last:10,aktKey:10,key:10);					
 				until (last) or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
 				if i>fullClusterLen then begin
@@ -648,23 +659,25 @@ begin
 	except
 		on EStreamError do result:=-304;
 	end;
-
+	if resList<>NIL then resList.Sort;
 	result:=n;
 end;
 
 
 function TClusterMasterD.InvalidateRecord(key,fid:cardinal):longint;
+const
+	undefStart	=	$FFFFFFFF;
 var
-	p																	:	PByte;
-	firstKey,aktKey,id,i,m,startI,lastI,lastGI,len,r,z	:	cardinal;
-	l																	:	longint;
-	n																	:	integer;
-	last,rpt,isFull,wasFull										:	boolean;
-// tron:boolean;
+	p												:	PByte;
+	firstKey,aktKey,id,i,m,datum,info,
+	preI,startI,lastI,lastPI,len,r,z		:	cardinal;
+	l												:	longint;
+	n												:	integer;
+	first,last,rpt,isFull,wasFull			:	boolean;
+
 begin
-//	trOn:=false; //key=15942;
-	
 	n:=0; firstKey:=key; result:=0;
+	resList.Free; resList:=NIL;				// GetItem speichert keine Ergebnisse
 	while key>0 do
 	try
 		aktKey:=key;
@@ -680,74 +693,51 @@ begin
 			key:=next;
 			p:=@occs;
 		end;
-		if (key=aktKey) then begin
+		if key=aktKey then begin
 			result:=-319; EXIT
 		end;
 
-		z:=$FFFFFFFF; r:=def1stReadLen; 
-		wasFull:=POccel(p)^.id and $C0000000=$C0000000; 
+		z:=undefStart; r:=def1stReadLen; 
+		wasFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster; 
 		repeat
-			i:=0; startI:=$FFFFFFFF; lastI:=0; lastGI:=0; len:=0; last:=false; rpt:=false; 
-			isFull:=POccel(p)^.id and $C0000000=$C0000000; 
+			i:=0; startI:=undefStart; lastI:=0; lastPI:=0; len:=0; last:=false; rpt:=false; 
+			isFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster; 
 			repeat			
-				if (POccel(p+i)^.id and $40000000<>0) then begin	//	nicht bei len flag ($80000000)
-					id:=0;
-//if tron then writeln('x:',i:10,id:10);
+				if POccel(p+i)^.id and dwIsID<>0 then begin	//	nicht bei len flag (dwIsIDInFullCluster)
+					id:=0; 
 					repeat
-//if tron then writeln('0:',i:10,id:10);
-						if id=0 then begin 
-							if i+occLen>r then begin
-								GetData(p,r); if i+occLen>r then begin result:=-310; EXIT end // nicht genug Daten vorhanden
-							end;
-							id:=POccEl(p+i)^.id and $3FFFFFFF;
-							if id=fid then begin
-								if startI<>$FFFFFFFF then begin // ID-Wiederholung, dieser Fall kann nur nach
-									rpt:=true; 
-									if lastI=0 then lastI:=i;	  // nachträglichem Verschieben im Cluster eintreten
-//if tron then writeln('rpt: ',aktKey:10,startI:10,lastI:10,i:10,id:10,n:10);									
-								end else begin	
-									startI:=i; inc(n);
-//if tron then writeln('1st: ',aktKey:10,startI:10,lastI:10,i:10,id:10,n:10);
-								end;
-					 		end else if (startI<>$FFFFFFFF) and (lastI=0) then 
-								lastI:=i; 
-							i+=4;
-//if tron then writeln('1:',i:10,id:10);
-						end else begin
-							if i+occLen-4>r then begin
-								GetData(p,r); if i+occLen-4>r then begin result:=-310; EXIT end 
-							end;
-							if (startI<>$FFFFFFFF) and (lastI=0) then begin
-//if tron then writeln('wdh: ',aktKey:10,startI:10,lastI:10,i:10,'       n=',n:10);
-								inc(n);
-							end;
-						end;	
-
-//if tron then writeln('2:',i:10,id:10);
-						if POccel(p+i)^.gewicht and $80<>0 then begin
-							if not isFull then begin result:=-311; EXIT end;	// Gewicht darf nicht in teil-leeren Cluster vorkommen
-							lastGI:=i; last:=true;
-							len:=(i+occLen) div occLen;
-//if tron then writeln('3:',i:10,id:10);
+						first:=id=0; preI:=i;
+						GetItem(p,last,i,r,id,datum,info,NIL,NIL);	
+						if first then begin
+							if id=fid then begin						
+								if startI<>undefStart then begin	// ID-Wiederholung, dieser Fall kann nur nach							
+									rpt:=true; 							// nachträglichem Verschieben im Cluster eintreten
+									if lastI=0 then lastI:=preI;
+								end else begin
+									startI:=preI; inc(n);
+								end
+							end else if (startI<>undefStart) and (lastI=0) then 
+								lastI:=preI;
+						end else if (startI<>undefStart) and (lastI=0) then
+							inc(n);
+						
+						if last then begin
+							if not isFull then begin result:=-311; EXIT; end;	// Gewicht darf nicht in teil-leeren Cluster vorkommen
+							lastPI:=i-2; 
+							len:=(i+occLen-1) div occLen;
 						end;
-//if tron then writeln('4:',i:10,id:10);
-						i+=occLen-4;
-//if tron then writeln('5:',i:10,id:10);
-						if i+4>r then GetData(p,r);
-						last:=last or (i+4>r);
-//if tron then writeln('6:',i:10,id:10,last:10,escMask[isFull]:10,escMask[isFull]<>0);
-					until (last) or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
+					until last or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
 					if i>fullClusterLen then begin
-						result:=-314; EXIT;			// kein Abbruchkriterium gefunden: Liste inkonsistent!
+						result:=-314; EXIT;		// kein Abbruchkriterium gefunden: Liste inkonsistent!
 					end;
 				end else begin
 					if isFull then begin	result:=-313; EXIT; end;	// Länge darf nicht in vollem Cluster vorkommen
-					len:=POccel(p+i)^.clen and $3FFFFFFF;
-					last:=true							// len flag ist - wie last flag - ein Abbruchkriterium
+					len:=POccel(p+i)^.clen shr 2;
+					last:=true						// len flag ist - wie last flag - ein Abbruchkriterium
 				end;
 			until last;
 
-			if startI<>$FFFFFFFF then begin
+			if startI<>undefStart then begin
 				if (len=0) or (len>maxCluster) then begin
 					result:=-312; EXIT 				// keine (gültige) Länge gefunden bzw. errechnet
 				end;
@@ -755,7 +745,7 @@ begin
 				if lastI>=i then						// zu löschende ID liegt am Ende des Clusters (rpt niemals true!)
 					z:=startI
 				else begin								// last flag löschen und Daten verschieben
-					if lastGI<>0 then POccel(p+lastGI)^.gewicht:=POccel(p+lastGI)^.gewicht and $7f; // last flag löschen
+					if lastPI<>0 then PWord(p+lastPI)^:=PWord(p+lastPI)^ and $FFFD; // last flag löschen
 					m:=i-lastI;
 					try
 						move(POccel(p+lastI)^,POccel(p+startI)^,m);
@@ -764,13 +754,12 @@ begin
 					end;
 					z:=startI+m;
 				end;
-//if tron then writeln('KFW: ',aktKey:10,startI:10,lastI:10,i:10,m:10,n:10);				
-				if z>0 then POccel(p)^.id:=POccel(p)^.id and $7FFFFFFF; // full flag löschen
-				POccel(p+z)^.clen:=len or $80000000;	// neue Länge (als Endemarke) eintragen
+				if z>0 then POccel(p)^.id:=POccel(p)^.id and $FFFFFFFD; // full flag (10b=2) löschen
+				POccel(p+z)^.clen:=(len shl 2) or dwIsLen;	// neue Länge (als Endemarke) eintragen
 			end;
 		until not rpt;
 
-		if z<>$FFFFFFFF then begin
+		if z<>undefStart then begin
 			occStream.Seek(aktKey+cluDaLen[aktKey=firstKey],soFromBeginning);
 			occStream.Write(p^,z+4);
 			if (recycling) and (wasFull) and (firstOcc^.last>aktKey) then begin // last-Zeiger des ersten Clusters auf akt. Cluster (zum späteren "Nachfüllen") setzen

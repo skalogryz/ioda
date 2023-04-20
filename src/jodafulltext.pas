@@ -22,6 +22,7 @@ uses CMEM, Classes, Strings, SysUtils, Volltext2, ConfigReader;
 
 const
 	VTMAXDBS = 32;
+	version	= '3.2';
 			 
 type			
 	EConfigError = class(Exception);
@@ -246,6 +247,5 @@ exports
 
 
 begin
-	for vti:=1 to VTMAXDBS do
-		vtdbs[vti]:=nil;
+	for vti:=1 to VTMAXDBS do vtdbs[vti]:=nil;
 end.
