@@ -13,9 +13,9 @@ Unit MD5;
 INTERFACE
 uses Classes,SysUtils;
 
-	function GetMD5(const s:string):string;
-	function GetMD5FromList(const sl:TStringList):string;	
-	
+  function GetMD5(const s:string):string;
+  function GetMD5FromList(const sl:TStringList):string;  
+  
 
 IMPLEMENTATION
 
@@ -289,23 +289,23 @@ END;
 
 function GetMD5(const s:string):string;
 var
-	hashvalue : array[1..4] of ulong;
+  hashvalue : array[1..4] of ulong;
 begin
    md5_hash_mem(PChar(s),length(s), @hashvalue);
-	result:=IntToHex(hashvalue[1],8)+IntToHex(hashvalue[2],8)+IntToHex(hashvalue[3],8)+IntToHex(hashvalue[4],8);
+  result:=IntToHex(hashvalue[1],8)+IntToHex(hashvalue[2],8)+IntToHex(hashvalue[3],8)+IntToHex(hashvalue[4],8);
 end;
 
 
 function GetMD5FromList(const sl:TStringList):string;
 var
-	hashvalue 	: 	array[1..4] of ulong;
-	s				:	string;
-	i				:	integer;
+  hashvalue   :   array[1..4] of ulong;
+  s        :  string;
+  i        :  integer;
 begin
-	s:='';
-	for i:=0 to sl.Count-1 do s:=s+' '+sl[i];
+  s:='';
+  for i:=0 to sl.Count-1 do s:=s+' '+sl[i];
    md5_hash_mem(PChar(s),length(s), @hashvalue);
-	result:=IntToHex(hashvalue[1],8)+IntToHex(hashvalue[2],8)+IntToHex(hashvalue[3],8)+IntToHex(hashvalue[4],8);
+  result:=IntToHex(hashvalue[1],8)+IntToHex(hashvalue[2],8)+IntToHex(hashvalue[3],8)+IntToHex(hashvalue[4],8);
 end;
 
 

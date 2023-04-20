@@ -5,14 +5,14 @@ Unit Globs;
 
 INTERFACE
 uses
-	BaseUnix,UnixUtil;
+  BaseUnix,UnixUtil;
 
 type
-	pglob = ^tglob;
-  	tglob = record
-   	name : pchar;
-    	next : pglob;
-  	end;
+  pglob = ^tglob;
+    tglob = record
+     name : pchar;
+      next : pglob;
+    end;
 
 
 Procedure Globfree(var p : pglob);

@@ -2,26 +2,26 @@ unit Unicode;
 {$H+}
 
 {
-	 Converts ISO-8859-xx charsets to UTF-8 and vice versa.
-	 
-	 This unit offers a subset of the functions and classes from the unit "unicode.pp":
-   	 Free Pascal Unicode support
-   	 Copyright (C) 2000 by Sebastian Guenther, sg@freepascal.org
-	 which is published under LGPL
+   Converts ISO-8859-xx charsets to UTF-8 and vice versa.
+   
+   This unit offers a subset of the functions and classes from the unit "unicode.pp":
+      Free Pascal Unicode support
+      Copyright (C) 2000 by Sebastian Guenther, sg@freepascal.org
+   which is published under LGPL
 
-	 The remaining part was modified in September 2004 by jo@magnus.de: 
-	 	- 8BitTables are now loadable at runtime, so no more compile time includes are necessary
-		- Pure AnsiStrings (no more PChars) are used in the interface
+   The remaining part was modified in September 2004 by jo@magnus.de: 
+     - 8BitTables are now loadable at runtime, so no more compile time includes are necessary
+    - Pure AnsiStrings (no more PChars) are used in the interface
 }
 
 INTERFACE
 uses SysUtils;
 type
 
-  UCChar 			= LongWord;					 // Unicode char type (32 bit)
-  T8BitTable 		= array[Char] of UCChar; // Table for translating 8 bit characters
-  P8BitTable 		= ^T8BitTable;
-  ENoTableError	=	class(Exception);
+  UCChar       = LongWord;           // Unicode char type (32 bit)
+  T8BitTable     = array[Char] of UCChar; // Table for translating 8 bit characters
+  P8BitTable     = ^T8BitTable;
+  ENoTableError  =  class(Exception);
 // -------------------------------------------------------------------
 //   Encoder & decoder base classes
 // -------------------------------------------------------------------
@@ -105,17 +105,17 @@ end;
 
 function Read8BitTable(const tableName:string; var table:T8BitTable):boolean;
 var
-	ft		:	file of T8BitTable;
+  ft    :  file of T8BitTable;
 begin
-	if not FileExists(tableName) then begin
-		raise ENoTableError.Create('Error reading "'+tableName+'"');
-		result:=false
-	end;
-	assign(ft,tableName); 
-	reset(ft);
-	read(ft,table);
-	close(ft);
-	result:=true
+  if not FileExists(tableName) then begin
+    raise ENoTableError.Create('Error reading "'+tableName+'"');
+    result:=false
+  end;
+  assign(ft,tableName); 
+  reset(ft);
+  read(ft,table);
+  close(ft);
+  result:=true
 end;
 
 
@@ -140,7 +140,7 @@ begin
   p:=@Source[1];
   while p[0] <> #0 do
   begin
-    if ShortInt(Ord(p[0])) > 0 then	// = "if Ord(p[0]) < $80 then"
+    if ShortInt(Ord(p[0])) > 0 then  // = "if Ord(p[0]) < $80 then"
     begin
       Result := Result + p[0];
       Inc(p);
@@ -170,7 +170,7 @@ end;
 
 constructor T8BitUTF8Encoder.Create(const ATablename:string);
 begin
-	if not Read8BitTable(ATablename,FTable) then FAIL
+  if not Read8BitTable(ATablename,FTable) then FAIL
 end;
 
 function T8BitUTF8Encoder.Encode(const Source: String): string;
@@ -204,7 +204,7 @@ begin
       if not Assigned(FL2RevTable[Index]) then
       begin
         New(FL2RevTable[Index]);
-	FillChar(FL2RevTable[Index]^, SizeOf(TL3RevTable), '?');
+  FillChar(FL2RevTable[Index]^, SizeOf(TL3RevTable), '?');
       end;
       FL2RevTable[Index]^[Ord(c) and $3f] := i;
     end else if c <= $ffff then
@@ -213,14 +213,14 @@ begin
       if not Assigned(FL1RevTable[Index]) then
       begin
         New(FL1RevTable[Index]);
-	FillChar(FL1RevTable[Index]^, SizeOf(TL2RevTable), #0);
+  FillChar(FL1RevTable[Index]^, SizeOf(TL2RevTable), #0);
       end;
       L1Table := FL1RevTable[Index];
       Index := (Ord(c) shr 6) and $3f;
       if not Assigned(L1Table^[Index]) then
       begin
         New(L1Table^[Index]);
-	FillChar(L1Table^[Index]^, SizeOf(TL3RevTable), '?');
+  FillChar(L1Table^[Index]^, SizeOf(TL3RevTable), '?');
       end;
       L1Table^[Index]^[Ord(c) and $3f] := i;
     end;
@@ -250,7 +250,7 @@ begin
   p:=@Source[1];
   while p[0] <> #0 do
   begin
-    if ShortInt(Ord(p[0])) > 0 then	// = "if Ord(p[0]) < $80 then"
+    if ShortInt(Ord(p[0])) > 0 then  // = "if Ord(p[0]) < $80 then"
     begin
       // 1-byte encoding
       Result := Result + FL3RevTable[Ord(p[0])];
@@ -272,10 +272,10 @@ begin
       if Assigned(L1Table) then
       begin
         Index := Ord(p[1]) and $3f;
-	if Assigned(L1Table^[Index]) then
-	  Result := Result + L1Table^[Index]^[Ord(p[3]) and $3f]
-	else
-	  Result := Result + '?';
+  if Assigned(L1Table^[Index]) then
+    Result := Result + L1Table^[Index]^[Ord(p[3]) and $3f]
+  else
+    Result := Result + '?';
       end else
         Result := Result + '?';
       Inc(p, 3);
