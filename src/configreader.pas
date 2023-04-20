@@ -52,10 +52,10 @@ type
     function   SearchBool(const name:string):boolean;
     function   SearchNum(const name:string):longint;
 
-    PUBLIC
-    property    Str[name:string]:string read Search; DEFAULT;
-    property    Bool[name:string]:boolean read SearchBool;
-    property    Int[name:string]:longint read SearchNum;
+  public
+    property    Str[const name:string]:string read Search; default;
+    property    Bool[const name:string]:boolean read SearchBool;
+    property    Int[const name:string]:longint read SearchNum;
     property    CmdCount:integer read cmd;
     property    CfgCount:integer read cfg;
   end;
