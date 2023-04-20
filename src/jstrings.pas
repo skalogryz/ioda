@@ -17,21 +17,21 @@ Unit jstrings;
 *)
 
 {$H+}
-INTERFACE
-  function StrSubst(s:string; const oldCh,newCh:char; cis:boolean):string;
-  function StrDel(s:string; const oldCh:char; cis:boolean):string;
-  function StrStrSubst(s:string; const oldStr,newStr:string; cis:boolean):string;
-  function Split(s,splitter:string; var a:array of String):integer;  
-  function Hex2Int(s:string):cardinal;
+interface
+
+function StrSubst(s:string; const oldCh,newCh:char; cis:boolean):string;
+function StrDel(s:string; const oldCh:char; cis:boolean):string;
+function StrStrSubst(s:string; const oldStr,newStr:string; cis:boolean):string;
+function Split(s,splitter:string; var a:array of String):integer;
+function Hex2Int(s:string):cardinal;
   
   
-IMPLEMENTATION
+implementation
+
 uses Sysutils;
 
 const
   hexstring   :   string  = '0123456789ABCDEF';
-  
-    
   
 function StrSubst(s:string; const oldCh,newCh:char; cis:boolean):string;
 var

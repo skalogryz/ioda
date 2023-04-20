@@ -17,48 +17,52 @@ Unit ConfigReader;
   Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA 
 *)
 
-INTERFACE
+interface
+
 uses
   Classes,SysUtils,JStrings;
 
 type
-  TStrContainer=class  
-            constructor Create(const str:string);
-            destructor  Destroy; OVERRIDE;
+  TStrContainer=class
+  public
+    constructor Create(const str:string);
+    destructor  Destroy; override;
 
-            PRIVATE
-            myStr  :  string;
+  private
+    myStr  :  string;
             
-            PUBLIC
-            property value:string read myStr write myStr;
-          end;
+  public
+    property value:string read myStr write myStr;
+  end;
 
   TConfigReader=class
-            constructor Create;
-            destructor  Destroy; OVERRIDE;
-            procedure   Clear;
-            function    ReadConfigFile(fname:string):integer;
-            function    ReadCommandLine:integer;
-            function    Add(s:string):boolean;
+  public
+    constructor Create;
+    destructor  Destroy; override;
+    procedure   Clear;
+    function    ReadConfigFile(fname:string):integer;
+    function    ReadCommandLine:integer;
+    function    Add(s:string):boolean;
 
-            PROTECTED
-            keyList  :  TStringList;
-            cfg,cmd  :  integer;
+  protected
+    keyList  :  TStringList;
+    cfg,cmd  :  integer;
 
-            function   Search(const name:string):string;
-            function   SearchBool(const name:string):boolean;
-            function   SearchNum(const name:string):longint;
+    function   Search(const name:string):string;
+    function   SearchBool(const name:string):boolean;
+    function   SearchNum(const name:string):longint;
 
-            PUBLIC
-            property    Str[name:string]:string read Search; DEFAULT;
-            property    Bool[name:string]:boolean read SearchBool;
-            property    Int[name:string]:longint read SearchNum;
-            property    CmdCount:integer read cmd;
-            property    CfgCount:integer read cfg;            
-          end;
+    PUBLIC
+    property    Str[name:string]:string read Search; DEFAULT;
+    property    Bool[name:string]:boolean read SearchBool;
+    property    Int[name:string]:longint read SearchNum;
+    property    CmdCount:integer read cmd;
+    property    CfgCount:integer read cfg;
+  end;
 
 
-IMPLEMENTATION
+implementation
+
 type
   TBuf    =  array[0..4095] of char;
   PBuf    =  ^TBuf;
