@@ -2,16 +2,17 @@
 (*                                                                          *)
 (*                               Top-Down-B-Baum                            *)
 (*                                                                          *)
-(*                        by jo@magnus.de                            *)
-(*                                                   *)
-(*                      DOS-Version 11/92                   *)
-(*                           Windows-Portierung 9/94                        *)
-(*                    Linux-FP-Portierung 6/01                 *)
-(*                  Dynamische Stringlängen 1/05               *)
-(*                 Wildcards und RegExpressions 6/05              *)
-(*                                                   *)
-(*                       Fehlermeldungen 100-299                    *)
-(*                                                   *)
+(*                        by jo@magnus.de                                   *)
+(*                                                                          *)
+(*                 DOS-Version 11/92                                        *)
+(*                 Windows-Portierung 9/94                                  *)
+(*                 Linux-FP-Portierung 6/01                                 *)
+(*                 Dynamische Stringlängen 1/05                             *)
+(*                 Wildcards und RegExpressions 6/05                        *)
+(*                                                                          *)
+(*                 Error Messages  100-299                                  *)
+(*                 Fehlermeldungen 100-299                                  *)
+(*                                                                          *)
 (****************************************************************************)
 
 (* Copyright (C) 1994-2005  jo@magnus.de
@@ -30,9 +31,10 @@
   Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA 
 *)
 
-UNIT BTreeFlex;
+unit BTreeFlex;
 {$H-}
-INTERFACE
+interface
+
 uses
   Classes,SysUtils,IdList;
 
@@ -42,143 +44,147 @@ const
 
 type
   TIOBuf  =  packed array[0..NODESIZE-1-16] of byte; // Platz für Header abziehen
-  TValArr  =  packed array [0..MAXVALCOUNT-1] of PVal;
+  TValArr =  packed array [0..MAXVALCOUNT-1] of PVal;
 
-  TNode    =  packed record
-            key,
-            counter,
-            size,
-            r    :  cardinal;      //   16 Bytes
-            buf  :  TIOBuf;        // 8176 Bytes * Bis hier hin wird 1:1 auf Medium gespeichert *
-            val  :  TValArr;        // Zeigern auf die Elemente in buf (MAXVALCOUNT*4 Bytes)
-          end;
+  TNode   =  packed record
+    key,
+    counter,
+    size,
+    r    :  cardinal; //   16 Bytes
+    buf  :  TIOBuf;   // 8176 Bytes * Bis hier hin wird 1:1 auf Medium gespeichert *
+    val  :  TValArr;  // Zeigern auf die Elemente in buf (MAXVALCOUNT*4 Bytes)
+  end;
   PNode    =  ^TNode;
 
   TCaller  =  procedure(const akt:TVal) of object;
   
-  TBayBaum  =  class
-              constructor Create;
-              destructor  Destroy; OVERRIDE;
-              
-              // Inserts a new word
-              function   Insert(newStr:string; dataptr:cardinal):boolean;
-              // Updates dataptr and/or counter for an existing word
-              function   Update(s:string; dataptr:cardinal; counter,counterMode:longint):boolean;
-              // Searches a word and returns the words meta information
-              function    SearchWord(s:string; var inf,dataptr:cardinal):boolean;
-              // Counts occurencies of word(s) if strict>0. Returns a guess for strict=0 and a long guess for strict<0
-              function    HowMany(s:string; strict:shortint):longint;
+  TBayBaum = class
+  public
+    constructor Create;
+    destructor  Destroy; OVERRIDE;
 
-              // results are returned by callback (except MultipleSearch) OR internal result list
-              // STRICT search i.e. foo
-              function    GetEqual(s:string; Caller:TCaller; maxHits:cardinal):TResList;
-              function    GetEqual(s:string; Caller:TCaller):TResList;
-              // HEAD search: head of search item has to match, i.e. foo*, best performance
-              function    GetAlike(s:string; Caller:TCaller; maxHits:cardinal):TResList;
-              function    GetAlike(s:string; Caller:TCaller):TResList;
-              // TAIL search: tail of search item has to match, i.e. *foo, high performance
-              function   GetTail(s:string; Caller:TCaller; maxHits:cardinal):TResList;
-              function   GetTail(s:string; Caller:TCaller):TResList;
-              // SUBSTRING search: search item has to be at least a substring, i.e. *foo*, lower performance
-              function    GetSub(s:string; Caller:TCaller; maxHits:cardinal):TResList;
-              function    GetSub(s:string; Caller:TCaller):TResList;
-              // REGEX AFTER HEAD search: uses a regex after a given literal head of the search item , i.e. /^foo.+/
-              // performance depends on the length of the head: high to low
-              function   GetAlikeRegEx(s,preS:string; Caller:TCaller; maxHits:cardinal):TResList;
-              function   GetAlikeRegEx(s,preS:string; Caller:TCaller):TResList;
-              // REGEX search, i.e.  /foo.+/, relativly the lowest performance of all search methods
-              function    GetRegEx(s:string; Caller:TCaller; maxHits:cardinal):TResList;
-              function    GetRegEx(s:string; Caller:TCaller):TResList;
-              // ALL IN ONE PASS: Get results for some search items given in a TStringList
-              // where strict < 0 (tail, substring or regex search. NOT used for regex after head search!)
-              // PParsEl records are assigned to the lists string items
-              function    MultipleSearch(sl:TStringList; maxHits:cardinal):TResList;
-              function     MultipleSearch(sl:TStringList):TResList;
-              // Get all words (sorted output of the complete tree)
-              function    GetAll(Caller:TCaller; maxHits:cardinal):TResList;
-              function    GetAll(Caller:TCaller):TResList;
+    // Inserts a new word
+    function   Insert(newStr:string; dataptr:cardinal):boolean;
+    // Updates dataptr and/or counter for an existing word
+    function   Update(s:string; dataptr:cardinal; counter,counterMode:longint):boolean;
+    // Searches a word and returns the words meta information
+    function    SearchWord(s:string; var inf,dataptr:cardinal):boolean;
+    // Counts occurencies of word(s) if strict>0. Returns a guess for strict=0 and a long guess for strict<0
+    function    HowMany(s:string; strict:shortint):longint;
 
-              // Helper for unsorting the internal result list (for a better [unsorted] building of a new btree)
-              procedure   Unsort;
-              // Writes back memory stream if it is dirty
-              procedure   Commit; VIRTUAL; ABSTRACT;
-              // Clears ALL data
-              procedure   Clear;  VIRTUAL; ABSTRACT;
-              // Switches temporary memory stream on (meaningless for TMemBayBaum)
-              // improves much better IO for following MultipleSearch or GetAll/GetSub/GetTail-Operations!
-              procedure   CacheOn;  VIRTUAL; ABSTRACT;
-              // Switches temporary memory stream off if used (meaningless for TMemBayBaum)
-              procedure   CacheOff; VIRTUAL; ABSTRACT;
+    // results are returned by callback (except MultipleSearch) OR internal result list
+    // STRICT search i.e. foo
+    function    GetEqual(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+    function    GetEqual(s:string; Caller:TCaller):TResList;
+    // HEAD search: head of search item has to match, i.e. foo*, best performance
+    function    GetAlike(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+    function    GetAlike(s:string; Caller:TCaller):TResList;
+    // TAIL search: tail of search item has to match, i.e. *foo, high performance
+    function   GetTail(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+    function   GetTail(s:string; Caller:TCaller):TResList;
+    // SUBSTRING search: search item has to be at least a substring, i.e. *foo*, lower performance
+    function    GetSub(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+    function    GetSub(s:string; Caller:TCaller):TResList;
+    // REGEX AFTER HEAD search: uses a regex after a given literal head of the search item , i.e. /^foo.+/
+    // performance depends on the length of the head: high to low
+    function   GetAlikeRegEx(s,preS:string; Caller:TCaller; maxHits:cardinal):TResList;
+    function   GetAlikeRegEx(s,preS:string; Caller:TCaller):TResList;
+    // REGEX search, i.e.  /foo.+/, relativly the lowest performance of all search methods
+    function    GetRegEx(s:string; Caller:TCaller; maxHits:cardinal):TResList;
+    function    GetRegEx(s:string; Caller:TCaller):TResList;
+    // ALL IN ONE PASS: Get results for some search items given in a TStringList
+    // where strict < 0 (tail, substring or regex search. NOT used for regex after head search!)
+    // PParsEl records are assigned to the lists string items
+    function    MultipleSearch(sl:TStringList; maxHits:cardinal):TResList;
+    function     MultipleSearch(sl:TStringList):TResList;
+    // Get all words (sorted output of the complete tree)
+    function    GetAll(Caller:TCaller; maxHits:cardinal):TResList;
+    function    GetAll(Caller:TCaller):TResList;
 
-              PROTECTED
-              root    :  TNode;
-              resList  :  TResList;
-              top,
-              wordCounter,
-              allCounter,
-              nodeCounter:cardinal;
-              bayError  :  integer;
-              dirty,
-              multiple,
-              stopped  :  boolean;
+    // Helper for unsorting the internal result list (for a better [unsorted] building of a new btree)
+    procedure   Unsort;
+    // Writes back memory stream if it is dirty
+    procedure   Commit; VIRTUAL; ABSTRACT;
+    // Clears ALL data
+    procedure   Clear;  VIRTUAL; ABSTRACT;
+    // Switches temporary memory stream on (meaningless for TMemBayBaum)
+    // improves much better IO for following MultipleSearch or GetAll/GetSub/GetTail-Operations!
+    procedure   CacheOn;  VIRTUAL; ABSTRACT;
+    // Switches temporary memory stream off if used (meaningless for TMemBayBaum)
+    procedure   CacheOff; VIRTUAL; ABSTRACT;
 
-              function    TellError:integer;
-              function    TellQuality:integer;
-              function    CreateNode(var el:PNode):boolean;
-              procedure  CopyNode(const elSrc:TNode; var elTarget:TNode);
-              procedure   ClearNodeContent(var el:TNode);
-              procedure   MoveNodeEl(var el:TNode; i,len:integer);
-              function    bSearch(s:string; alike:boolean; var el:TNode; var i:integer):integer;
-              function    Split(var prev,akt:TNode):boolean;
-              function    Search(s:string; dataptr:cardinal; alike:boolean; var el:TNode; var n:integer):boolean;
-              procedure   AddResult(const val:TVal);
-              function    GetResult(i:integer):TVal;
-              function   GetCount:integer;
-              function    GetElem(var el:TNode; id:cardinal):boolean; VIRTUAL; ABSTRACT;
-              function    SetElem(var el:TNode):boolean; VIRTUAL; ABSTRACT;
+  protected
+    root     :  TNode;
+    resList  :  TResList;
+    top,
+    wordCounter,
+    allCounter,
+    nodeCounter : cardinal;
+    bayError    : integer;
+    dirty,
+    multiple,
+    stopped     :  boolean;
 
-              PUBLIC
-              property    Results[i:integer]:TVal read GetResult; DEFAULT;
-              //        ^^ wenn "caller" der letzten GetXX/TraverseXX-Operation NIL war
-              property    Count:integer read GetCount;
-              property    ResultList:TResList read resList;
-              property    Error:integer read tellError;
-              property    Stopp:boolean write stopped;
-              property    WordCount:cardinal read wordCounter;
-              property    AllCount:cardinal read allCounter;
-              property     NodeCount:cardinal read nodeCounter;
-              property    Quality:integer read TellQuality;
-          end;
+    function    TellError:integer;
+    function    TellQuality:integer;
+    function    CreateNode(var el:PNode):boolean;
+    procedure  CopyNode(const elSrc:TNode; var elTarget:TNode);
+    procedure   ClearNodeContent(var el:TNode);
+    procedure   MoveNodeEl(var el:TNode; i,len:integer);
+    function    bSearch(s:string; alike:boolean; var el:TNode; var i:integer):integer;
+    function    Split(var prev,akt:TNode):boolean;
+    function    Search(s:string; dataptr:cardinal; alike:boolean; var el:TNode; var n:integer):boolean;
+    procedure   AddResult(const val:TVal);
+    function    GetResult(i:integer):TVal;
+    function   GetCount:integer;
+    function    GetElem(var el:TNode; id:cardinal):boolean; VIRTUAL; ABSTRACT;
+    function    SetElem(var el:TNode):boolean; VIRTUAL; ABSTRACT;
+
+  public
+    property    Results[i:integer]:TVal read GetResult; DEFAULT;
+    //        ^^ wenn "caller" der letzten GetXX/TraverseXX-Operation NIL war
+    property    Count:integer read GetCount;
+    property    ResultList:TResList read resList;
+    property    Error:integer read tellError;
+    property    Stopp:boolean write stopped;
+    property    WordCount:cardinal read wordCounter;
+    property    AllCount:cardinal read allCounter;
+    property     NodeCount:cardinal read nodeCounter;
+    property    Quality:integer read TellQuality;
+  end;
 
   TFileBayBaum=class(TBayBaum)
-              constructor Create(const name:string; readOnly:boolean; var res:integer);
-              destructor  Destroy; OVERRIDE;
-              procedure   Commit; OVERRIDE;
-              procedure   Clear;  OVERRIDE;
-              procedure   CacheOn;  OVERRIDE;
-              procedure   CacheOff; OVERRIDE;
+  public
+    constructor Create(const name:string; readOnly:boolean; var res:integer);
+    destructor  Destroy; OVERRIDE;
+    procedure   Commit; OVERRIDE;
+    procedure   Clear;  OVERRIDE;
+    procedure   CacheOn;  OVERRIDE;
+    procedure   CacheOff; OVERRIDE;
               
-              PROTECTED
-              elStream    :  TStream;
-              myFileName  :  string;
-              ro,roSave  :  boolean;
-              
-              function    GetElem(var el:TNode;id:cardinal):boolean; OVERRIDE;
-              function    SetElem(var el:TNode):boolean; OVERRIDE;
-              procedure  WriteHeader;
-          end;
+  protected
+    elStream    :  TStream;
+    myFileName  :  string;
+    ro,roSave  :  boolean;
+
+    function    GetElem(var el:TNode;id:cardinal):boolean; OVERRIDE;
+    function    SetElem(var el:TNode):boolean; OVERRIDE;
+    procedure  WriteHeader;
+  end;
             
   TMemBayBaum=class(TFileBayBaum)
-              constructor Create(const name:string; initSize,growSize:longint; readOnly:boolean; var res:integer);
-              destructor  Destroy;  OVERRIDE;
-              procedure   Commit;   OVERRIDE;
-              procedure   Clear;    OVERRIDE;
-              procedure   CacheOn;  OVERRIDE;
-              procedure   CacheOff; OVERRIDE;
-          end;
+  public
+    constructor Create(const name:string; initSize,growSize:longint; readOnly:boolean; var res:integer);
+    destructor  Destroy;  OVERRIDE;
+    procedure   Commit;   OVERRIDE;
+    procedure   Clear;    OVERRIDE;
+    procedure   CacheOn;  OVERRIDE;
+    procedure   CacheOff; OVERRIDE;
+  end;
         
   
-IMPLEMENTATION
+implementation
+
 uses
   JStreams,RegExpr;
   
@@ -247,8 +253,8 @@ procedure TBayBaum.MoveNodeEl(var el:TNode; i,len:integer);
 var
   j,n:  integer;
 begin
-   n:=el.size-cardinal(PByte(el.val[i])-@el.buf);
-   move(el.val[i]^,PVal(PByte(el.val[i])+len)^,n);        // Daten im Puffer (buf) verschieben
+  n:=el.size-cardinal(PByte(el.val[i])-@el.buf);
+  move(el.val[i]^,PVal(PByte(el.val[i])+len)^,n);        // Daten im Puffer (buf) verschieben
   move(el.val[i],el.val[i+1],(el.counter-cardinal(i))*4);// Zeiger um eins nach recht
   for j:=i+1 to el.counter do el.val[j]:=PVal(PByte(el.val[j])+len); // Zeiger darauf anpassen, Platz für neuen Zeiger schaffen:
 end;      

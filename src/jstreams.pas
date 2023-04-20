@@ -29,7 +29,7 @@ type
     destructor  Destroy; OVERRIDE;
     function Realloc(var newCapacity: longint): Pointer;  OVERRIDE;
     
-  PROTECTED
+  protected
     iSize,
     aSize  :  longint;
   end;
