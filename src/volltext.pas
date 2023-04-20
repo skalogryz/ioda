@@ -1,19 +1,21 @@
 unit Volltext;
 {
-  Das Unit Volltext verbindet die Module Bayerbaum (bayBaum), Vorkommensliste (occTable) 
-  und Dateiliste (fileRef) zu einer Datenbank. Es nutzt einen Parser (syntaxParser), der
-  Suchanfragen zerlegen kann, die die Teilausdrücke gewichtet und die Suche triggert.
-  Die Datenbank selbst kann Wortlisten archivieren - Format: wort[,info]. 
+  Volltext = Full-text (search)
+
+  The Volltext unit connects the modules Bayer tree (bayBaum), Occurrence list (occTable)
+  and file list (fileRef) to a database. It uses a parser (syntaxParser) that
+  Search queries can be broken down, which weights the partial expressions and triggers the search.
+  The database itself can archive word lists - format: word[,info].
   
-  Sie kann auch einzelne Dateien hinzufügen oder ganze Verzeichnisbäume abscannen. In beiden 
-  Fällen wird ein externen Filter zur Erzeugung der Wortliste benutzt, der in einer
-  beliebigen Programmiersprache verfasst sein kann. Unter Linux erfolgt die Kommunikation per
-  Pipe, alternativ auch per temporärer Datei.
-    
-  Mit der Methode MergeDB kann eine zweite Datenbank zur primären hinzugefügt werden. Mit dieser
-  Funktion kann auch eine Datenbank optimiert werden, indem mit TVolltext eine neue DB
-  angelegt und die bestehende hinzu "merged" wird. Dabei werden Cluster und fileRef-Dateien
-  optimal neu aufgebaut, weil bei beiden Dateien zusammengehörige Blöcke zusammengefasst werden.
+  It can also add individual files or scan entire directory trees. In both
+  cases, an external filter is used to generate the word list, which is contained in a
+  can be written in any programming language. Under Linux, communication takes place via
+  Pipe, alternatively also via a temporary file.
+
+  A second database can be added to the primary one using the MergeDB method. With this
+  A database can also be optimized by using TVolltext to create a new DB
+  created and the existing one is "merged". This will cluster and fileRef files
+  optimally rebuilt because blocks that belong together are combined in both files.
 
   Fehlernummern 600-699
   
@@ -72,193 +74,204 @@ type
                     const idList:TDWList; minAge:word):integer of object;
 
 // Volltext-Klasse:
-  TVolltext =  class
-            constructor Create(const db:string; mode:TDbMode; var res:integer);
-            destructor   Destroy; OVERRIDE;
-// Suchmethoden
-            function Suche(var such:string; const von,bis,fileFilter:string; maxTreffer,sortOrder:integer; bitFilter:byte; var overflow:boolean):integer;
-                  // byteFilter für Bittests kann, je nach Occtype, ein oder drei byte sein, weiteres siehe "BTest"
-                  // maxTreffer<0: Flag for UTF-8 decoding required, maxTreffer:=abs(maxTreffer)
-            function vlSuche(var such : string; const von,bis,fileFilter:string; bitFilter: PByte; bitFilterNum,maxTreffer,sortOrder:integer; var overflow:boolean):integer;
-                  // mehrere Bittests möglich, siehe unter "BTest"
-                  // maxTreffer<0: Flag for UTF-8 decoding required, maxTreffer:=abs(maxTreffer)
-// Einfüge-Methoden
-                  function ChainDuplicate(fname:string; lastID:cardinal; var id:cardinal): integer;
-                     // externe schnittstelle zum verketten von doubletten
-                     // wird über libjodafulltext exportiert und vom python interface verwendet
+  TVolltext = class
+  public
+    constructor Create(const db:string; mode:TDbMode; var res:integer);
+    destructor   Destroy; OVERRIDE;
 
-                  function InsertWords(worte:TStringList; fname,datum,md5Sum:string; info: cardinal; var id:cardinal):integer; 
-                  // Insert-Schnittstelle zu aufrufenden *Pascal*-Programmen und intern benutzt
-                  // datum darf leer sein, dann wird das Tagesdatum eingesetzt
-                  
-            function InsertWordsFromFile(const wordListFile,inFile,datum:string; info:cardinal; var id:cardinal):integer;
-                  // Insert-Schnittstelle zu bel. Programmen, fertige Worteliste (ein Wort/Zeile) via Datei oder Pipe
-                  // datum darf leer sein, dann wird das Tagesdatum eingesetzt
-                  // "inFile" darf leer sein, wenn keine Filereferenz benutzt wird, sonst der echte Dateinamen
-                  
-            function InsertWordsFromProgram(inFile,datum:string; var id:cardinal):integer; 
-                  // Insert-Schnittstelle zu bel. Programmen, Datei (txt, html u.a.) wird über cfg['execProg'] geparst und indiziert
-                  // datum darf leer sein, dann wird das Tagesdatum eingesetzt
+    // Search methods (Suchmethoden)
 
-            function InsertWordsFromFiles(path,pattern,datum:string):integer; 
-                  // Insert-Schnittstelle zu bel. Programmen, wie vor, jedoch für ganze Verzeichnisbäume
-                  // kann Doubletten über MD5 erkennen und verketten (1) oder ignorieren (2)
-                  // datum darf leer sein, dann wird das Dateidatum eingesetzt
+    // byteFilter für Bittests kann, je nach Occtype, ein oder drei byte sein, weiteres siehe "BTest"
+    // maxTreffer<0: Flag for UTF-8 decoding required, maxTreffer:=abs(maxTreffer)
+    function Suche(var such:string; const von,bis,fileFilter:string; maxTreffer,sortOrder:integer; bitFilter:byte; var overflow:boolean):integer;
 
-            function  InsertWordsFromPipe():integer;
-                  // Spezialfunktion von Oli G. zum Einfügen vieler Wortlisten aus versch. Dateien per Pipe (-> E-Paper Graz)
-                  
-// Optimierungs- und DB-Misch-Methoden:
-            function  MergeDB(const sourceDB,startDatum:string; wordCheck,fileCheck,verbose:boolean):integer; 
-                  // mischt sourceDB zu db. Kann auch zur Optimierung von Cluster (.occ) und fileRef (.ref) benutzt werden,
-                  // indem eine die Ziel-Instanz (db) leer angelegt und die Quelle (secondDB) die bestehende DB ist.
-
-            function ExecMerge(source:TVolltext; const startDatum:string; wordCheck,fileCheck,destructive,verbose:boolean):integer;
-                  // nur für aufrufende Pascal-Programme:
-                  // kann statt MergeDB aufgerufen werden, wenn Source-VT-Instanz selbst verwaltet wird (z.B. Server "jodad")
-                  // destructive löscht die Source-DB nach erfolgreichem Merge
-
-//  Service-Methoden für andere Pascal-Programme:
-            function ReOpenDB:integer;
-                  // Datenbank wird neu initialisiert
-                  
-            function  GetResultList(var list:TStringList):integer;
-                  // gibt alle Suchergebnisse in einer TStringList heraus (list darf NIL sein und wird dann angelegt)
-                  
-            procedure Clear;
-                  // Reine Memory-Datenbanken werden gelöscht (für temporäre DB in jodad)
-
-// Lösch-Methoden:                  
-            function  InvalidateEntry(worte:TStringList; id:cardinal):integer;
-                  // Lösch-Schnittstelle für Pascal-Programme
-                  // Ein Eintrag, ggf. mitsamt allen Doubletten, wird als ungültig markiert:
-                  // Occtable: Eintrag wird gelöscht, Platz kann wiederverwendet werden
-                  // FileRef:  Eintrag wird geleert, Speicherplatz bleibt belegt (=> MergeDB verwenden)
-                  
-            function InvalidateEntryFromFile(const wordListFile:string; id:cardinal):integer;
-                  // Lösch-Schnittstelle zu bel. Programmen, fertige Worteliste (ein Wort/Zeile) via Datei oder Pipe
-
-            function InvalidateEntryFromProgram(inFile:string; id:cardinal):integer;
-                  // Lösch-Schnittstelle zu bel. Programmen, Datei (txt, html u.a.) wird über cfg['execProg'] geparst und Worte gelöscht
-                  // tmpFile sollte bei Linux leer sein (=Pipe)
-            // s=issuePattern[,issuePreferred]: setzt ThirdLevelCheck auf Ausgabensortierung 
-            // und ggf. auf bevorzugte Ausgabe um bzw. bei Leerstring wieder zurück.
-            // issuePreferred='': reine alphabetische Sortierung ohne bevorzugte Ausgabe.
-            // BOTH are regexes!
-            procedure   SetSortedResults(const s:string);  // jo 31.1.2003
-            // added by ograf 28.10.2004
-            //
-            // better SetSortedResults interfaces without parsing
-            // and added version without regex but
-            // offset and length
-            //
-            procedure   SetSortedResults(const pattern, preferred: string);
-            procedure   SetSortedResults(const offset, length: integer; preferred: string);
-            procedure   SetLockFile(createFile:boolean);    // creates (true) or erases a lockFile (.LOCK)
-
-            PROTECTED
-            treffer      :  THitList;
-            tmpdup      :  TDupSortList;
-            unworte,
-            flList,
-            btResList    :  TStringList;
-            btree        :  TBaybaum;
-            occ        :  TClusterMaster;
-            fileRef      :  TfileRef;
-            secunda      :  TVolltext;
-            log        :  TLogbook;
-            reg        :  TRegExpr;
-            ThirdLevelCheck:  TThirdLevelCheck;
-            fileList      :  THash;
-            utf8Decoder    :  TUTF8Decoder;
-            issueOffset,
-            issueLength,
-            extSearch    :  integer;
-            issuePattern,
-            issuePreferred,
-            dbCfg,
-            dbName,
-            basePathName,
-            fFilter,
-            tmpFile,
-            execProg,
-            lastQuery    :   string;
-            vlbFilterNum,
-            rres,
-            doubletten    :  integer;
-            vlbFilter    :  PByte;
-            maxFind,
-            btreeCapacity,
-            btreeGrowSize,
-            occCapacity,
-            occGrowSize,
-            refCapacity,
-            refGrowSize    :  longint;
-            globalInfoBits  :  cardinal;
-            dStart,
-            dSTop        :  word;
-            mapMode,
-            vtError,
-            maxNums,
-            opeNed,
-            useBigOccList_,
-            occSize,
-            useMemBtree,
-            useFileRef,
-            flPass       :  integer;
-            mapFactor    :  real;
-            ro,
-            recycling,
-            fFilterFilter,
-            useLog,
-            useWordFilter,
-            followLinks,
-            caseSensitive,
-            tempDB,
-            clonedDB,
-            dbLocked      :  boolean;
-
-            function    GetSortedResultMode:string;
-            function    TellError:integer;
-            function   Age95(const datum:string):longint;
-            function   Wortzeichen(const s:string):boolean;
-            procedure   PrepareSearch(var parsEl:TParsEl);
-            procedure   FirstLevelCheck(var parsEl:TParsEl; idList:TDWList; diff:longint; operation:TOp);
-            procedure   SecondLevelCheck(idL,ocL,curL:TDWList; diff:longint; operation:TOp);
-            function   ThirdLevelCheck_WithSortedFileRef(id,datum,gewicht,info:cardinal):boolean;
-            function   ThirdLevelCheck_WithFileRef(id,datum,gewicht,info:cardinal):boolean;
-            function   ThirdLevelCheck_WithoutFileRef(id,datum,gewicht,info:cardinal):boolean;
-            function   BTest(info:cardinal):boolean;
-            function    GetTreffer(i:integer):string;
-            function    GetTrefferPtr(i  : integer):PHit;
-            function    GetAllTrefferPtr():PHitArray;
-            function    GetTrefferCount():integer;
-            function   CountC(count,wcount:cardinal):cardinal;
-            function   InsertWord(s : string; fid,fpos,info,wcount:cardinal; age:word):integer; 
-            function   GetWordsFromProgram(inFile:string; var worte:TStringList):integer;
-
-            function    ScanCluster_WithFileRef(const wort:string; var key,optimized,checked:cardinal; 
-                                     const idList:TDWList; minAge:word):integer;
-            function    ScanCluster_WithoutFileRef(const wort:string; var key,optimized,checked:cardinal; 
-                                      const idList:TDWList; minAge:word):integer;
-            function   InvalidateWord(s:string; fid:cardinal):integer;  // Löschen einzelner Worte
-            
-            PUBLIC
-            property    Suchergebnis[i:integer]:string read GetTreffer; DEFAULT;
-            property    HitPtr[i:integer]:PHit read GetTrefferPtr;
-            property    HitArrayPtr  : PHitArray read GetAllTrefferPtr;
-            property    HitCount:integer read getTrefferCount;
-            property    SortIssues  : string read GetSortedResultMode write SetSortedResults;
-            property    Error       : integer read TellError;
-            property    MaxNumsPerWord : integer read maxNums write maxNums;
-            property    BasePath     : string read basePathName write basePathName;
-            property    DatabaseName: string read dbName;
-            property    DatabaseConfigName: string read dbCfg;
-            property    Query:string read lastQuery;
-          end;               
+    // mehrere Bittests möglich, siehe unter "BTest"
+    // maxTreffer<0: Flag for UTF-8 decoding required, maxTreffer:=abs(maxTreffer)
+    function vlSuche(var such : string; const von,bis,fileFilter:string; bitFilter: PByte; bitFilterNum,maxTreffer,sortOrder:integer; var overflow:boolean):integer;
 
 
-IMPLEMENTATION
+    // Insertion Methods (Einfüge-Methoden)
+
+    // externe schnittstelle zum verketten von doubletten
+    // wird über libjodafulltext exportiert und vom python interface verwendet
+    function ChainDuplicate(fname:string; lastID:cardinal; var id:cardinal): integer;
+
+    // Insert-Schnittstelle zu aufrufenden *Pascal*-Programmen und intern benutzt
+    // datum darf leer sein, dann wird das Tagesdatum eingesetzt
+    function InsertWords(worte:TStringList; fname,datum,md5Sum:string; info: cardinal; var id:cardinal):integer;
+
+    // Insert-Schnittstelle zu bel. Programmen, fertige Worteliste (ein Wort/Zeile) via Datei oder Pipe
+    // datum darf leer sein, dann wird das Tagesdatum eingesetzt
+    // "inFile" darf leer sein, wenn keine Filereferenz benutzt wird, sonst der echte Dateinamen
+    function InsertWordsFromFile(const wordListFile,inFile,datum:string; info:cardinal; var id:cardinal):integer;
+
+    // Insert-Schnittstelle zu bel. Programmen, Datei (txt, html u.a.) wird über cfg['execProg'] geparst und indiziert
+    // datum darf leer sein, dann wird das Tagesdatum eingesetzt
+    function InsertWordsFromProgram(inFile,datum:string; var id:cardinal):integer;
+
+    // Insert-Schnittstelle zu bel. Programmen, wie vor, jedoch für ganze Verzeichnisbäume
+    // kann Doubletten über MD5 erkennen und verketten (1) oder ignorieren (2)
+    // datum darf leer sein, dann wird das Dateidatum eingesetzt
+    function InsertWordsFromFiles(path,pattern,datum:string):integer;
+
+    // Spezialfunktion von Oli G. zum Einfügen vieler Wortlisten aus versch. Dateien per Pipe (-> E-Paper Graz)
+    function  InsertWordsFromPipe():integer;
+
+
+    // Optimierungs- und DB-Misch-Methoden:
+
+    // mischt sourceDB zu db. Kann auch zur Optimierung von Cluster (.occ) und fileRef (.ref) benutzt werden,
+    // indem eine die Ziel-Instanz (db) leer angelegt und die Quelle (secondDB) die bestehende DB ist.
+    function  MergeDB(const sourceDB,startDatum:string; wordCheck,fileCheck,verbose:boolean):integer;
+
+    // nur für aufrufende Pascal-Programme:
+    // kann statt MergeDB aufgerufen werden, wenn Source-VT-Instanz selbst verwaltet wird (z.B. Server "jodad")
+    // destructive löscht die Source-DB nach erfolgreichem Merge
+    function ExecMerge(source:TVolltext; const startDatum:string; wordCheck,fileCheck,destructive,verbose:boolean):integer;
+
+    //  Service-Methoden für andere Pascal-Programme:
+
+    // Datenbank wird neu initialisiert
+    function ReOpenDB:integer;
+
+    // gibt alle Suchergebnisse in einer TStringList heraus (list darf NIL sein und wird dann angelegt)
+    function  GetResultList(var list:TStringList):integer;
+
+    // Reine Memory-Datenbanken werden gelöscht (für temporäre DB in jodad)
+    procedure Clear;
+
+    // Lösch-Methoden:
+
+    // Lösch-Schnittstelle für Pascal-Programme
+    // Ein Eintrag, ggf. mitsamt allen Doubletten, wird als ungültig markiert:
+    // Occtable: Eintrag wird gelöscht, Platz kann wiederverwendet werden
+    // FileRef:  Eintrag wird geleert, Speicherplatz bleibt belegt (=> MergeDB verwenden)
+    function  InvalidateEntry(worte:TStringList; id:cardinal):integer;
+
+    // Lösch-Schnittstelle zu bel. Programmen, fertige Worteliste (ein Wort/Zeile) via Datei oder Pipe
+    function InvalidateEntryFromFile(const wordListFile:string; id:cardinal):integer;
+
+    // Lösch-Schnittstelle zu bel. Programmen, Datei (txt, html u.a.) wird über cfg['execProg'] geparst und Worte gelöscht
+    // tmpFile sollte bei Linux leer sein (=Pipe)
+    // s=issuePattern[,issuePreferred]: setzt ThirdLevelCheck auf Ausgabensortierung
+    // und ggf. auf bevorzugte Ausgabe um bzw. bei Leerstring wieder zurück.
+    // issuePreferred='': reine alphabetische Sortierung ohne bevorzugte Ausgabe.
+    // BOTH are regexes!
+    function InvalidateEntryFromProgram(inFile:string; id:cardinal):integer;
+
+    // added by ograf 28.10.2004
+    //
+    // better SetSortedResults interfaces without parsing
+    // and added version without regex but
+    // offset and length
+    procedure   SetSortedResults(const s:string);  // jo 31.1.2003
+    procedure   SetSortedResults(const pattern, preferred: string);
+    procedure   SetSortedResults(const offset, length: integer; preferred: string);
+    procedure   SetLockFile(createFile:boolean);    // creates (true) or erases a lockFile (.LOCK)
+
+  protected
+    treffer      :  THitList;
+    tmpdup      :  TDupSortList;
+    unworte,
+    flList,
+    btResList    :  TStringList;
+    btree        :  TBaybaum;
+    occ        :  TClusterMaster;
+    fileRef      :  TfileRef;
+    secunda      :  TVolltext;
+    log        :  TLogbook;
+    reg        :  TRegExpr;
+    ThirdLevelCheck:  TThirdLevelCheck;
+    fileList      :  THash;
+    utf8Decoder    :  TUTF8Decoder;
+    issueOffset,
+    issueLength,
+    extSearch    :  integer;
+    issuePattern,
+    issuePreferred,
+    dbCfg,
+    dbName,
+    basePathName,
+    fFilter,
+    tmpFile,
+    execProg,
+    lastQuery    :   string;
+    vlbFilterNum,
+    rres,
+    doubletten    :  integer;
+    vlbFilter    :  PByte;
+    maxFind,
+    btreeCapacity,
+    btreeGrowSize,
+    occCapacity,
+    occGrowSize,
+    refCapacity,
+    refGrowSize    :  longint;
+    globalInfoBits  :  cardinal;
+    dStart,
+    dSTop        :  word;
+    mapMode,
+    vtError,
+    maxNums,
+    opeNed,
+    useBigOccList_,
+    occSize,
+    useMemBtree,
+    useFileRef,
+    flPass       :  integer;
+    mapFactor    :  real;
+    ro,
+    recycling,
+    fFilterFilter,
+    useLog,
+    useWordFilter,
+    followLinks,
+    caseSensitive,
+    tempDB,
+    clonedDB,
+    dbLocked      :  boolean;
+
+    function    GetSortedResultMode:string;
+    function    TellError:integer;
+    function   Age95(const datum:string):longint;
+    function   Wortzeichen(const s:string):boolean;
+    procedure   PrepareSearch(var parsEl:TParsEl);
+    procedure   FirstLevelCheck(var parsEl:TParsEl; idList:TDWList; diff:longint; operation:TOp);
+    procedure   SecondLevelCheck(idL,ocL,curL:TDWList; diff:longint; operation:TOp);
+    function   ThirdLevelCheck_WithSortedFileRef(id,datum,gewicht,info:cardinal):boolean;
+    function   ThirdLevelCheck_WithFileRef(id,datum,gewicht,info:cardinal):boolean;
+    function   ThirdLevelCheck_WithoutFileRef(id,datum,gewicht,info:cardinal):boolean;
+    function   BTest(info:cardinal):boolean;
+    function    GetTreffer(i:integer):string;
+    function    GetTrefferPtr(i  : integer):PHit;
+    function    GetAllTrefferPtr():PHitArray;
+    function    GetTrefferCount():integer;
+    function   CountC(count,wcount:cardinal):cardinal;
+    function   InsertWord(s : string; fid,fpos,info,wcount:cardinal; age:word):integer;
+    function   GetWordsFromProgram(inFile:string; var worte:TStringList):integer;
+
+    function    ScanCluster_WithFileRef(const wort:string; var key,optimized,checked:cardinal;
+                             const idList:TDWList; minAge:word):integer;
+    function    ScanCluster_WithoutFileRef(const wort:string; var key,optimized,checked:cardinal;
+                              const idList:TDWList; minAge:word):integer;
+    function   InvalidateWord(s:string; fid:cardinal):integer;  // Löschen einzelner Worte
+
+    PUBLIC
+    property    Suchergebnis[i:integer]:string read GetTreffer; DEFAULT;
+    property    HitPtr[i:integer]:PHit read GetTrefferPtr;
+    property    HitArrayPtr  : PHitArray read GetAllTrefferPtr;
+    property    HitCount:integer read getTrefferCount;
+    property    SortIssues  : string read GetSortedResultMode write SetSortedResults;
+    property    Error       : integer read TellError;
+    property    MaxNumsPerWord : integer read maxNums write maxNums;
+    property    BasePath     : string read basePathName write basePathName;
+    property    DatabaseName: string read dbName;
+    property    DatabaseConfigName: string read dbCfg;
+    property    Query:string read lastQuery;
+  end;
+
+implementation
+
 const
   maxTitelLen  =  1024;
   nonos :  set of char  = ['.',#44,';','!','?','=','"',#39,'/',':','-','`','*','+','\','<','>','|','(',')','[',']','{','}','&','÷'];  
