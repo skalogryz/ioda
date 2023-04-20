@@ -56,10 +56,16 @@ var
 begin
   try
     if paramCount=0 then HELP;
+
     cfg:=TConfigReader.Create;
-    if copy(paramstr(1),1,1)<>'-' then cfg.Add('-q');
+
+    if copy(paramstr(1),1,1)<>'-' then
+      cfg.Add('-q');
     i:=cfg.ReadCommandLine+1;
-    if cfg['openMode']<>'' then openMode:=TdbMode(cfg.Int['openMode']) else openMode:=undefinedOpenMode;
+
+    if cfg['openMode']<>'' then
+      openMode:=TdbMode(cfg.Int['openMode']) else openMode:=undefinedOpenMode;
+
     db:=ChangeFileExt(paramstr(i),''); db_:=db;
     if (cfg.Bool['-opt']) then begin
       p:=pos(':',db_);       // Sonderfall Optimize: Target ist temporäre DB, MergeDB benennt später in SourceDB um
@@ -68,9 +74,12 @@ begin
       else
         db:=db+':';        // Quelle besitzt eigene Config
     end;
-    res:=0; doLock:=cfg.Bool['-lockdb'];
+
+    res:=0;
+    doLock:=cfg.Bool['-lockdb'];
     vt:=TVolltext.Create(db,TDBMode(openMode),res);
-    if res<>0 then raise EConfigError.Create('Fehler beim Öffnen der Datenbank "'+db+'" - Code='+IntToStr(res));
+    if res<>0 then
+      raise EConfigError.Create('Fehler beim Öffnen der Datenbank "'+db+'" - Code='+IntToStr(res));
 
     if cfg.Bool['-x'] or cfg.Bool['-xu'] or cfg.Bool['-q'] or cfg.Bool['-qu'] then begin
       fFilter:=''; von:=''; bis:=''; maxTreffer:=100; sortOrder:=2; info:=0; bFilter:='';
