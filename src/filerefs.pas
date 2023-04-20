@@ -142,11 +142,14 @@ end;
 
 
 procedure TFileRef.WriteHeader;
+var
+	ch : char;
 begin
 	refStream.Seek(0,soFromBeginning);
 	refStream.Write(cs[1],length(cs));		//	erste id darf nicht null sein
 	refStream.Seek(minTop*align-1,soFromBeginning);
-	refStream.Write(#0,1);
+	ch := #0;
+	refStream.Write(ch,1);
 end;
 
 

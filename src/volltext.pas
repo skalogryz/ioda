@@ -1017,7 +1017,7 @@ var
 	info_,inf			:	cardinal;
 	age					:	longint;
 	i,j,res,n,words,w	:	integer;
-	
+	ca : TCardArr;
 begin
 	if ro then begin  
 		result:=-601; EXIT
@@ -1076,7 +1076,9 @@ begin
 			while ((j<insList.Count) and (insList[j]=s)) do begin
 				if (insList.ids[j][1] and globalInfoBits)<>inf then begin
 					info_:=info_ or (insList.ids[j][1] and globalInfoBits);
-					insList.ids[j][1]:=insList.ids[j][1] or inf;
+					ca := insList.ids[j];
+					ca[1]:=ca[1] or inf;
+					insList.ids[j] := ca;
 				end;
 				inc(n); inc(j);
 			end;

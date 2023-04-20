@@ -48,6 +48,7 @@ type
 				function	AddWithFileRef(fileref, title : string; id, date, weight, info: cardinal): integer;
 				function	GetHit(i : integer): THit;
 				procedure	CustomSort();
+				public
 				sortStr, prefStr: string;
 				PROTECTED
 				sortRe	 : TRegExpr;

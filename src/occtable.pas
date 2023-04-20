@@ -262,12 +262,15 @@ end;
 
 
 procedure TClusterMaster.WriteHeader;
+var
+	ch : char;
 begin
 	occStream.Seek(0,soFromBeginning);
 	occStream.WriteDWord(occLen);
 	occStream.Write(cs[1],length(cs));
 	occStream.Seek(minKey-1,soFromBeginning);
-	occStream.Write(#0,1);
+	ch := #0;
+	occStream.Write(ch,1);
 	nextkey:=minKey;
 end;
 
