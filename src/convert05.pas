@@ -1,4 +1,4 @@
-program CheckBTree;
+program Convert05;
 {$H+}
 (* Copyright (C) 1994-2005  jo@magnus.de
    This library is free software; you can redistribute it and/or modify it 
@@ -18,21 +18,21 @@ program CheckBTree;
 
 
 uses
-   Classes,SysUtils,BtreeFlex;
+   Classes,SysUtils,OldBayerBaum,BtreeFlex;
 
 type
 	TPrg	=	class
-					constructor Create(const name:string; zeige:cardinal; var res:integer);
+					constructor Create(const name:string; var res:integer);
 					destructor  Destroy; OVERRIDE;
 					procedure	Run;
 					
 				PRIVATE
-					baum	:	TBayBaum;
-					loLimit,
+					oldBaum	: 	TOldFileBayBaum;
+					baum		:	TBayBaum;
 					words,
 					allwords	:	cardinal;
 					
-					procedure Count(var akt:Tval);
+					procedure 	Convert(var akt:TOldVal);
 				
 				PUBLIC
 					property 	Worte:cardinal read words; 
@@ -41,39 +41,38 @@ type
 
 
 
-constructor TPrg.Create(const name:string; zeige:cardinal; var res:integer);
+constructor TPrg.Create(const name:string; var res:integer);
 begin
 	inherited Create;
-	words:=0; allwords:=0; loLimit:=zeige;
-	baum:=TMemBayBaum.Create(name,0,0,true,res);
+	words:=0; allwords:=0; 
+	oldbaum:=TOldFileBayBaum.Create(name,true,res);
 	if res<>0 then FAIL;
-	with baum do
-	begin
-		writeln(' QUALITY: ',quality:10);
-		writeln(' WORDS    ',WordCount:10);
-		writeln(' ENTRIES: ',AllCount:10);
-		writeln(' NODES:   ',NodeCount:10);		
-	end;
+	baum:=TMemBayBaum.Create(name,67108864,16777216,false,res);
+	if res<>0 then FAIL;
 end;
 
 
 destructor TPrg.Destroy;
 begin
 	inherited Destroy;
-	baum.Free
+	baum.Free;
+	oldbaum.Free;
 end;
 
 
 procedure TPrg.Run;
 begin
-	baum.GetAll(@Count);
+	oldbaum.GetAll(@Convert);
 end;
 
 	
-procedure TPrg.Count(var akt:Tval);
+procedure TPrg.Convert(var akt:TOldVal);
 begin
-	if (akt.z>=loLimit) or (akt.s=paramstr(2)) then writeln(akt.z:12,akt.s:20);
-	inc(words);
+	if baum.Insert(akt.s,akt.dp) and baum.Update(akt.s,akt.dp,akt.z,0) then begin
+		if words mod 5000 = 0 then write(#13,' WORDS:   ',words:10);
+	end else 
+		writeln('Failed: ',akt.s);
+	inc(words); 
 	inc(allwords,akt.z);
 end;
 
@@ -81,22 +80,17 @@ end;
 var
 	prg	:	TPrg;
 	res	:	integer;
-	zeige	:	cardinal;
 begin
-	zeige:=StrToIntDef(paramstr(2),1000000);
-	prg:=TPrg.Create(paramstr(1),zeige,res);
+	prg:=TPrg.Create(paramstr(1),res);
 	if res=0 then 
 		prg.Run 
-	else 
-	begin
+	else begin
 		writeln('RES=',res);
 		HALT(1)
 	end;
 	
-	writeln(' nachgezählt:');
-	writeln(' WORDS:   ',prg.Worte:10);
+	writeln(#13,' WORDS:   ',prg.Worte:10);
 	writeln(' ENTRIES: ',prg.AlleWorte:10);
 	prg.Free;
 end.
-
 

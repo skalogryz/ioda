@@ -8,7 +8,7 @@ unit DirScanner;
 	TFileList ist ein Nachkomme von TStringlist, der als Default-Eigenschaft
 	statt der üblichen Strings das TSearchRec seiner TSearchObj-Objekte liefert.
 	
-	Benutzt in die Klasse TRegEx verpackte RegExMaschinen, die noch nicht
+	Benutzt in die Klasse TRegExpr verpackte RegExMaschinen, die noch nicht
 	ausgereift sind: ^ $ funktionieren nicht + und * nur teilweise.
 *)
 
@@ -30,7 +30,7 @@ unit DirScanner;
 
 INTERFACE
 uses
-	Classes,SysUtils,RegExprO,JStrings{$IFDEF LINUX},UnixUtil,BaseUnix,Unix{$ENDIF};
+	Classes,SysUtils,RegExpr,JStrings{$IFDEF LINUX},BaseUnix,UnixUtil,Unix,Globs{$ENDIF};
 		
 type
 	TSearchObj	=	class
@@ -67,7 +67,7 @@ type
 							PROTECTED
 							fileliste:	TFileList;
 							unfiles	:	TStringList;
-							pattern	:	{$IFDEF LINUX} string {$ELSE}	TRegEx {$ENDIF};
+							pattern	:	{$IFDEF LINUX} string {$ELSE}	TRegExpr {$ENDIF};
 							maxR		:	integer;
 
 							procedure 	Travel(const path:string; r:integer);
@@ -152,7 +152,10 @@ begin
 		unfiles.LoadFromFile(unfileName);
 		for i:=0 to unfiles.Count-1 do
 			if (pos('REGEX=',unfiles[i])=1) or (pos('REGEX_',unfiles[i])=1) then
-				unfiles.objects[i]:=TRegEx.Create(copy(unfiles[i],7,256))
+			begin
+				unfiles.objects[i]:=TRegExpr.Create;
+				TRegExpr(unfiles.objects[i]).Expression:=copy(unfiles[i],7,256);
+			end;
 	end;
 end;
 
@@ -179,7 +182,7 @@ begin
 		begin
 			if pos(unfiles[i],s)>0 then EXIT
 		end else
-			if TRegEx(unfiles.objects[i]).Match(s) then EXIT
+			if TRegExpr(unfiles.objects[i]).Exec(s) then EXIT
 	end;
 	result:=true;
 end;
@@ -215,7 +218,6 @@ begin
 		if (shortname<>'.') and (shortname<>'..') and NameOK(name) then
 	  	begin
 			fpStat(name,info);
-			if fpS_ISLNK(info.mode) then Continue;	// funktioniert nicht
       	if fpS_ISDIR(info.mode) then
 			begin
 	    		if (r<maxR) then Travel(name,r+1)
@@ -233,7 +235,7 @@ begin
 	fliste.Free;
 {$ELSE}
 begin
-	e:=FindFirst(path+'/*.*',255,srec);
+	e:=FindFirst(path+'/*',255,srec);
   	while e=0 do
   	begin
 		shortname:=srec.name; name:=path+'/'+shortname; 
@@ -242,7 +244,7 @@ begin
       	if srec.attr and faDirectory<>0 then
 			begin
 	    		if r<maxR then Travel(name,r+1)
-       	end else if pattern.Match(srec.name) then
+       	end else if pattern.Exec(srec.name) then
 			begin
 				srec.name:=name;
 			 	fileliste.AddSearchRec(shortname,srec);
@@ -265,7 +267,8 @@ begin
 	Travel(path,0);
 {$ELSE}
 	searchPattern:=StrStrSubst(searchPattern,'*','\w*',false);
-	pattern:=TRegEx.Create(searchPattern);
+	pattern:=TRegExpr.Create;
+	pattern.Expression:=searchPattern;
 	Travel(path,0);
   	pattern.Free;
 {$ENDIF}

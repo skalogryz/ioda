@@ -132,7 +132,8 @@ begin
 	p:=pos('=',s); if p=0 then EXIT;
 	k:=Uppercase(Trim(copy(s,1,p-1)));
 	v:=Trim(copy(s,p+1,length(s)-p));
-	keyList.AddObject(k,TStrContainer.Create(v));
+	if Search(k)='' then
+		keyList.AddObject(k,TStrContainer.Create(v));
 	result:=true
 end;
 
@@ -215,8 +216,14 @@ function TConfigReader.ReadCommandLine:integer;
 var
 	i	:	integer;
 begin
-	for i:=1 to paramCount do 
-		if Add(paramStr(i)) then inc(cmd);
+	i:=1;
+	while i<=paramCount do begin;
+		if Add(paramStr(i))	then
+			inc(cmd)
+		else
+			break;
+		inc(i);
+	end;
 	result:=cmd;
 end;
 

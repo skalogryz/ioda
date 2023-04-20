@@ -1,4 +1,4 @@
-UNIT OccTable3;
+UNIT OccTable;
 { 
 	stellt ein Hilfsobjekt für das Volltextobjekt zur Verfügung.
 	Zusammen mit einem Bayerbaum eingesetzt, speichert es alle Vorkommen eines	Strings.
@@ -7,7 +7,7 @@ UNIT OccTable3;
 	jo 4/95, portiert nach Linux-fp 6/01, völlig neu gefasst 5/04	
 }
 
-(* Copyright (C) 1994-2004  jo@magnus.de
+(* Copyright (C) 1994-2005  jo@magnus.de
    This library is free software; you can redistribute it and/or modify it 
 	under the terms of the GNU Lesser General Public License as published by
 	the Free Software Foundation; either version 2.1 of the License, or 
@@ -110,10 +110,10 @@ type
 
 		function		GetResult(i:integer):TDW;
 		function 	GetCount:integer;
-		procedure	GetData(p:PByte; var r:cardinal);
-		procedure 	GetItem(p:PByte; var last:boolean; var i,r,id,datum,info:cardinal; callback:TTraverse; resi:TDWList);
+		function		GetData(p:PByte; var r:cardinal; min:cardinal):boolean;
+		function		GetItem(p:PByte; var last:boolean; var i,r,id,datum,info:cardinal; callback:TTraverse; resi:TDWList):boolean;
 		procedure 	SetContReadLen(len:cardinal);
-		procedure 	CallbackNOP(elID,elPos,elDat,elWeight,elInf:cardinal); // Beispiel eines Callbacks
+//		procedure 	CallbackNOP(elID,elPos,elDat,elWeight,elInf:cardinal); // Beispiel eines Callbacks
 		
 		PUBLIC
 		property		Results[i:integer]:TDW read GetResult; DEFAULT;
@@ -153,7 +153,6 @@ const
 	wIsID					= $0001;
 	wIsLast				= $0002;
 	wIsLen				= $0002;
-	maxClusterLen=maxCluster*largestOccLen;	// größtmögliche Clusterlänger in Byte
 	cluDaLen	:	array[boolean] of cardinal = (4,8);
 	escMask	:	array[boolean] of cardinal = (dwIsIDInFullCluster,dwIsID);
 
@@ -210,7 +209,7 @@ begin
 			else
 				occStream:=TFileStream.Create(myFileName,fmOpenReadWrite);
 			occLen:=occStream.ReadDWord; 
-			nextKey:=occStream.Size;
+			nextKey:=occStream.Size and $FFFFFFFF;
 		end else
 		begin
 			if readOnly then raise EFWrongFileType.Create('ReadOnly mode requestet - may not create file!');
@@ -271,51 +270,44 @@ begin end;
 
 function TClusterMaster.GetResult(i:integer):TDW;
 begin
-	try	
-		if resList=NIL then raise EListError.Create('RESLIST is not initialized (NIL)');
+	if resList=NIL then
+		fillDWord(result,sizeOf(TDW) shr 2,0)
+	else	
 		result:=resList.Element[i];
-	except
-		on EListError do fillDWord(result,sizeOf(TDW) shr 2,0);
-	end;
 end;
 
 
 function TClusterMaster.GetCount:integer;
 begin
-	try	
-		if resList=NIL then raise EListError.Create('RESLIST is not initialized (NIL)');
+	if resList=NIL then begin
+		fillDWord(result,sizeOf(TDW) shr 2,0);
+		result:=0;
+	end else
 		result:=resList.Count;
-	except
-		on EListError do fillDWord(result,sizeOf(TDW) shr 2,0);
-	end;
 end;
 
 
-procedure TClusterMaster.GetData(p:PByte; var r:cardinal);
+function TClusterMaster.GetData(p:PByte; var r:cardinal; min:cardinal):boolean;
 var
 	b,n	:	cardinal;
 begin
+	result:=false;
 	if (p=NIL) or (r>=fullClusterLen) then EXIT;
-	try
-		if r+defContReadLen>=fullClusterLen then b:=fullClusterLen-r else b:=defContReadLen;
-		p+=r;
-		n:=occStream.Read(p^,b);
-		r+=n;
-	except
-		on E:Exception do writeln(' EX=',E.message,' in occtable.GetData');	
-	end;
+	if r+defContReadLen>=fullClusterLen then b:=fullClusterLen-r else b:=defContReadLen;
+	p+=r;
+	n:=occStream.Read(p^,b);
+	r+=n;
+	result:=r>=min;
 end;
 
 
-procedure TClusterMaster.GetItem(p:PByte; var last:boolean; var i,r,id,datum,info:cardinal; callback:TTraverse; resi:TDWList);
+function TClusterMaster.GetItem(p:PByte; var last:boolean; var i,r,id,datum,info:cardinal; callback:TTraverse; resi:TDWList):boolean;
 var
 	pos,gewicht,hiInfo	:	cardinal;
 begin
-	last:=true;
+	last:=true; result:=false;
 	if id=0 then begin
-		if i+occLen>r then begin
-			GetData(p,r); if i+occLen>r then EXIT;		// nicht genug Daten vorhanden
-		end;
+		if (i+occLen>r) and (not GetData(p,r,i+occLen)) then EXIT;		// nicht genug Daten vorhanden
 		id:=POccEl(p+i)^.id shr 2;				// flags ausfiltern
 		if occLen>8 then begin					// datum & info werden nur beim ersten Wort gespeichert!
 			datum:=POccEl(p+i+4)^.datum;
@@ -333,9 +325,7 @@ begin
 		info:= (POccEl(p+i)^.info) or hiInfo;
 		i+=4;
 	end else begin
-		if i+2>r then begin
-			GetData(p,r); if i+2>r then EXIT;// nicht genug Daten vorhanden
-		end;
+		if (i+2>r) and (not GetData(p,r,i+2)) then EXIT;// nicht genug Daten vorhanden
 		pos:=  PWord(p+i)^ shr 2;
 		last:= PWord(p+i)^ and wIsLast<>0;
 		i+=2;
@@ -347,13 +337,12 @@ begin
 	else if resi<>NIL then 
 		resi.Add([id,pos,datum,gewicht,info]);
 
-	if i+4>r then GetData(p,r);
-	last:=last or (i+4>r)
+	if i+4>r then last:=last or not GetData(p,r,i+4);
+   result:=true
 end;
 
 
-procedure TClusterMaster.CallbackNOP(elID,elPos,elDat,elWeight,elInf:cardinal);
-begin { nur als Beispiel gedacht }  end;
+// procedure TClusterMaster.CallbackNOP(elID,elPos,elDat,elWeight,elInf:cardinal); als Beispiel
 
 
 function TClusterMaster.GetItemCount(key:cardinal):longint;
@@ -415,22 +404,22 @@ var	 														// Result<0 für Fehler, 0 für o.k.
 	isFull,dirty,repeater					:	boolean;
 
 begin
-	result:=0; lastI:=0; lastID:=0; dirty:=false;
-	size:=size and $3FFF;						// size kann maximal 16383 sein
-	// Daten zunächst auf drei Record-Varianten (jeweils DWords) verteilen:
-	idEl.id:=(elID shl 2) or dwIsID;		// ID-Flag setzen
-	with moreDatEl do begin
-		datum		:= elDate;
-		moreInfo := elInfo shr 16;
-	end;
-	if elPos>$3FFF then elPos:=0;			// keine Wortpositionen > 16383 möglich
-	with datEl do begin
-		info  	:= elInfo and $FFFF;
-		pos   	:= elPos shl 2;			// Platz für Flags schaffen
-	end;
-
-	if size>maxCluster then	size:=maxCluster else if size=0 then size:=defCluster;
 	try
+		result:=0; lastI:=0; lastID:=0; dirty:=false;
+		size:=size and $3FFF;						// size kann maximal 16383 sein
+// Daten zunächst auf drei Record-Varianten (jeweils DWords) verteilen:
+		idEl.id:=(elID shl 2) or dwIsID;		// ID-Flag setzen
+		with moreDatEl do begin
+			datum		:= word(elDate);
+			moreInfo := elInfo shr 16;
+		end;
+		if elPos>$3FFF then elPos:=0;			// keine Wortpositionen > 16383 möglich
+		with datEl do begin
+			info  	:= elInfo and $FFFF;
+			pos   	:= elPos shl 2;			// Platz für Flags schaffen
+		end;
+
+		if size>maxCluster then	size:=maxCluster else if size=0 then size:=defCluster;
 		if key=0 then begin						// FALL 1: neues Wort, Erstcluster anlegen
 			key:=NewCluster(size,true);
 			if size=1 then begin
@@ -468,18 +457,13 @@ begin
 		
 		if not isFull then begin
 			len:=0; i:=0; r:=def1stReadLen;	// nach dem Ende des teilvollen Cluster suchen
-			while ((len=0) and (i<fullClusterLen)) do begin
-				if i+4>r then begin				// +4 muss vorhanden sein, weil Cluster hier nicht voll sein kann (not isFull!)
-					GetData(p,r); if i+4>r then begin result:=-305; EXIT; end;	// sollte nicht vorkommen: zu wenig Daten vorhanden
-				end;
-				
+			while ((len=0) and (i<fullClusterLen)) do begin // +4 ^^ muss vorhanden sein, weil Cluster hier nicht voll sein kann (not isFull!)
+				if (i+4>r) and (not GetData(p,r,i+4)) then begin result:=-305; EXIT; end;	// sollte nicht vorkommen: zu wenig Daten vorhanden
 				w:=PWord(p+i)^ and $0003;		// zum Bit-Test wird nur ein Word benutzt (Flags in lsb und lsb+1)
 				if w=wIsID then begin			//	is ID
 					lastID:=POccEl(p+i)^.id shr 2;// id merken (falls gleiche ID)
 					lastI:=i+occLen-2;			// Zeiger auf letzte pos (Wordptr!) merken (für ev. last flag unten)
-					if i+occLen-4>r then begin	
-						GetData(p,r); if i+occLen-4>r then begin result:=-305; EXIT; end;	// sollte nicht vorkommen: zu wenig Daten vorhanden
-					end;
+					if (i+occLen-4>r) and (not GetData(p,r,i+occLen-4)) then begin result:=-305; EXIT; end;	// sollte nicht vorkommen: zu wenig Daten vorhanden
 					lastInfo:=POccEl(p+i+occLen-4)^.info; // info für Vergleich unten merken
 					if occLen>10 then lastInfo:=lastInfo or (POccEl(p+i+4)^.moreInfo shl 16);
 					i+=occLen						// um occLen (8,10 oder 12 Bytes) weitergehen				
@@ -596,7 +580,7 @@ begin
 			occStream.Write(occ^,4+occLen*size);// neuen Cluster wegen Dateilänge unbedingt komplett abspeichern
 		end;												// Fall 4 ist fertig
 	except
-		on E:Exception do begin writeln(' EX=',E.message,' in occtable2.InsertRecord'); result:=-304; end;
+		on E:Exception do result:=-304;
 	end;
 end;
 
@@ -610,51 +594,52 @@ var
 	last,isFull									:	boolean;
 	
 begin
-	n:=0; firstKey:=key;
-	if (callback<>NIL) or (countOnly) then begin
-		resList.Free; resList:=NIL;
-	end else begin
-		if resList=NIL then resList:=TDWList.Create(maxlongint) else resList.Clear;
-	end;
-	
-	while key>0 do 
 	try
-		aktKey:=key;
-		occStream.Seek(key,soFromBeginning);
-		if key=firstKey then with firstocc^ do begin
-			l:=occStream.Read(firstOcc^,8+def1stReadLen);
-			if l=0 then begin
-				result:=-315; EXIT
-			end;
-			key:=next;
-			p:=@occs;
-		end else with occ^ do begin
-			l:=occStream.Read(occ^,4+def1stReadLen);
-			if l=0 then begin
-				result:=-315; EXIT
-			end;
-			key:=next;
-			p:=@occs;
+		n:=0; firstKey:=key;
+		if (callback<>NIL) or (countOnly) then begin
+			resList.Free; resList:=NIL;
+		end else begin
+			if resList=NIL then resList:=TDWList.Create(maxlongint) else resList.Clear;
 		end;
-		if (key=aktKey) then begin
-			result:=-316; EXIT
-		end;
-		
-		i:=0; last:=false; r:=def1stReadLen;
-		isFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster;
-		while not last do begin
-			if (POccel(p+i)^.id and dwIsID<>0) then begin	//	nicht bei len flag (dwIsLen)
-				id:=0; 
-				repeat
-//write(firstKey:10,id:10);
-					GetItem(p,last,i,r,id,datum,info,callback,resList); inc(n); 
-//writeln(' => ',id:10,i:10,last:10,aktKey:10,key:10);					
-				until (last) or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
-				if i>fullClusterLen then begin
-					result:=-314; EXIT;				// normales Abbruchkriterium nicht gefunden: Liste inkonsistent!
+
+		while key>0 do begin
+			aktKey:=key;
+			occStream.Seek(key,soFromBeginning);
+			if key=firstKey then with firstocc^ do begin
+				l:=occStream.Read(firstOcc^,8+def1stReadLen);
+				if l=0 then begin
+					result:=-315; EXIT
 				end;
-			end else 
-				BREAK										// len flag ist - wie last flag - ein Abbruchkriterium
+				key:=next;
+				p:=@occs;
+			end else with occ^ do begin
+				l:=occStream.Read(occ^,4+def1stReadLen);
+				if l=0 then begin
+					result:=-315; EXIT
+				end;
+				key:=next;
+				p:=@occs;
+			end;
+			if (key=aktKey) then begin
+				result:=-316; EXIT
+			end;
+
+			i:=0; last:=false; r:=def1stReadLen;
+			isFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster;
+			while not last do begin
+				if (POccel(p+i)^.id and dwIsID<>0) then begin	//	nicht bei len flag (dwIsLen)
+					id:=0; 
+					repeat
+	//write(firstKey:10,id:10);
+						if GetItem(p,last,i,r,id,datum,info,callback,resList) then inc(n); 
+	//writeln(' => ',id:10,i:10,last:10,aktKey:10,key:10);					
+					until (last) or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
+					if i>fullClusterLen then begin
+						result:=-314; EXIT;				// normales Abbruchkriterium nicht gefunden: Liste inkonsistent!
+					end;
+				end else 
+					BREAK										// len flag ist - wie last flag - ein Abbruchkriterium
+			end;
 		end;
 	except
 		on EStreamError do result:=-304;
@@ -676,99 +661,100 @@ var
 	first,last,rpt,isFull,wasFull			:	boolean;
 
 begin
-	n:=0; firstKey:=key; result:=0;
-	resList.Free; resList:=NIL;				// GetItem speichert keine Ergebnisse
-	while key>0 do
 	try
-		aktKey:=key;
-		occStream.Seek(key,soFromBeginning);
-		if key=firstKey then with firstocc^ do begin
-			l:=occStream.Read(firstOcc^,8+def1stReadLen);
-			if l=0 then begin result:=-317; EXIT; end;
-			key:=next;
-			p:=@occs;
-		end else with occ^ do begin
-			l:=occStream.Read(occ^,4+def1stReadLen);
-			if l=0 then begin	result:=-318; EXIT; end;
-			key:=next;
-			p:=@occs;
-		end;
-		if key=aktKey then begin
-			result:=-319; EXIT
-		end;
+		n:=0; firstKey:=key; result:=0;
+		resList.Free; resList:=NIL;				// GetItem speichert keine Ergebnisse
 
-		z:=undefStart; r:=def1stReadLen; 
-		wasFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster; 
-		repeat
-			i:=0; startI:=undefStart; lastI:=0; lastPI:=0; len:=0; last:=false; rpt:=false; 
-			isFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster; 
-			repeat			
-				if POccel(p+i)^.id and dwIsID<>0 then begin	//	nicht bei len flag (dwIsIDInFullCluster)
-					id:=0; 
-					repeat
-						first:=id=0; preI:=i;
-						GetItem(p,last,i,r,id,datum,info,NIL,NIL);	
-						if first then begin
-							if id=fid then begin						
-								if startI<>undefStart then begin	// ID-Wiederholung, dieser Fall kann nur nach							
-									rpt:=true; 							// nachträglichem Verschieben im Cluster eintreten
-									if lastI=0 then lastI:=preI;
-								end else begin
-									startI:=preI; inc(n);
-								end
-							end else if (startI<>undefStart) and (lastI=0) then 
-								lastI:=preI;
-						end else if (startI<>undefStart) and (lastI=0) then
-							inc(n);
-						
-						if last then begin
-							if not isFull then begin result:=-311; EXIT; end;	// Gewicht darf nicht in teil-leeren Cluster vorkommen
-							lastPI:=i-2; 
-							len:=(i+occLen-1) div occLen;
+		while key>0 do begin
+			aktKey:=key;
+			occStream.Seek(key,soFromBeginning);
+			if key=firstKey then with firstocc^ do begin
+				l:=occStream.Read(firstOcc^,8+def1stReadLen);
+				if l=0 then begin result:=-317; EXIT; end;
+				key:=next;
+				p:=@occs;
+			end else with occ^ do begin
+				l:=occStream.Read(occ^,4+def1stReadLen);
+				if l=0 then begin	result:=-318; EXIT; end;
+				key:=next;
+				p:=@occs;
+			end;
+			if key=aktKey then begin
+				result:=-319; EXIT
+			end;
+
+			z:=undefStart; r:=def1stReadLen; 
+			wasFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster; 
+			repeat
+				i:=0; startI:=undefStart; lastI:=0; lastPI:=0; len:=0; last:=false; rpt:=false; 
+				isFull:=POccel(p)^.id and dwIsIDInFullCluster=dwIsIDInFullCluster; 
+				repeat			
+					if POccel(p+i)^.id and dwIsID<>0 then begin	//	nicht bei len flag (dwIsIDInFullCluster)
+						id:=0; 
+						repeat
+							first:=id=0; preI:=i;
+							GetItem(p,last,i,r,id,datum,info,NIL,NIL);	
+							if first then begin
+								if id=fid then begin						
+									if startI<>undefStart then begin	// ID-Wiederholung, dieser Fall kann nur nach							
+										rpt:=true; 							// nachträglichem Verschieben im Cluster eintreten
+										if lastI=0 then lastI:=preI;
+									end else begin
+										startI:=preI; inc(n);
+									end
+								end else if (startI<>undefStart) and (lastI=0) then 
+									lastI:=preI;
+							end else if (startI<>undefStart) and (lastI=0) then
+								inc(n);
+
+							if last then begin
+								if not isFull then begin result:=-311; EXIT; end;	// Gewicht darf nicht in teil-leeren Cluster vorkommen
+								lastPI:=i-2; 
+								len:=(i+occLen-1) div occLen;
+							end;
+						until last or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
+						if i>fullClusterLen then begin
+							result:=-314; EXIT;		// kein Abbruchkriterium gefunden: Liste inkonsistent!
 						end;
-					until last or (POccel(p+i)^.id and escMask[isFull]<>0) or (i>fullClusterLen);
-					if i>fullClusterLen then begin
-						result:=-314; EXIT;		// kein Abbruchkriterium gefunden: Liste inkonsistent!
+					end else begin
+						if isFull then begin	result:=-313; EXIT; end;	// Länge darf nicht in vollem Cluster vorkommen
+						len:=POccel(p+i)^.clen shr 2;
+						last:=true						// len flag ist - wie last flag - ein Abbruchkriterium
 					end;
-				end else begin
-					if isFull then begin	result:=-313; EXIT; end;	// Länge darf nicht in vollem Cluster vorkommen
-					len:=POccel(p+i)^.clen shr 2;
-					last:=true						// len flag ist - wie last flag - ein Abbruchkriterium
-				end;
-			until last;
+				until last;
 
-			if startI<>undefStart then begin
-				if (len=0) or (len>maxCluster) then begin
-					result:=-312; EXIT 				// keine (gültige) Länge gefunden bzw. errechnet
-				end;
-				if lastI=0 then lastI:=i; m:=0;
-				if lastI>=i then						// zu löschende ID liegt am Ende des Clusters (rpt niemals true!)
-					z:=startI
-				else begin								// last flag löschen und Daten verschieben
-					if lastPI<>0 then PWord(p+lastPI)^:=PWord(p+lastPI)^ and $FFFD; // last flag löschen
-					m:=i-lastI;
-					try
-						move(POccel(p+lastI)^,POccel(p+startI)^,m);
-					except
-						result:=-321; EXIT;
+				if startI<>undefStart then begin
+					if (len=0) or (len>maxCluster) then begin
+						result:=-312; EXIT 				// keine (gültige) Länge gefunden bzw. errechnet
 					end;
-					z:=startI+m;
+					if lastI=0 then lastI:=i; m:=0;
+					if lastI>=i then						// zu löschende ID liegt am Ende des Clusters (rpt niemals true!)
+						z:=startI
+					else begin								// last flag löschen und Daten verschieben
+						if lastPI<>0 then PWord(p+lastPI)^:=PWord(p+lastPI)^ and $FFFD; // last flag löschen
+						m:=i-lastI;
+						try
+							move(POccel(p+lastI)^,POccel(p+startI)^,m);
+						except
+							result:=-321; EXIT;
+						end;
+						z:=startI+m;
+					end;
+					if z>0 then POccel(p)^.id:=POccel(p)^.id and $FFFFFFFD; // full flag (10b=2) löschen
+					POccel(p+z)^.clen:=(len shl 2) or dwIsLen;	// neue Länge (als Endemarke) eintragen
 				end;
-				if z>0 then POccel(p)^.id:=POccel(p)^.id and $FFFFFFFD; // full flag (10b=2) löschen
-				POccel(p+z)^.clen:=(len shl 2) or dwIsLen;	// neue Länge (als Endemarke) eintragen
-			end;
-		until not rpt;
+			until not rpt;
 
-		if z<>undefStart then begin
-			occStream.Seek(aktKey+cluDaLen[aktKey=firstKey],soFromBeginning);
-			occStream.Write(p^,z+4);
-			if (recycling) and (wasFull) and (firstOcc^.last>aktKey) then begin // last-Zeiger des ersten Clusters auf akt. Cluster (zum späteren "Nachfüllen") setzen
-				if aktKey=firstKey then	firstOcc^.last:=0 else firstOcc^.last:=aktKey;
-				occStream.Seek(firstKey,soFromBeginning);
-				occStream.Write(firstOcc^,4);
+			if z<>undefStart then begin
+				occStream.Seek(aktKey+cluDaLen[aktKey=firstKey],soFromBeginning);
+				occStream.Write(p^,z+4);
+				if (recycling) and (wasFull) and (firstOcc^.last>aktKey) then begin // last-Zeiger des ersten Clusters auf akt. Cluster (zum späteren "Nachfüllen") setzen
+					if aktKey=firstKey then	firstOcc^.last:=0 else firstOcc^.last:=aktKey;
+					occStream.Seek(firstKey,soFromBeginning);
+					occStream.Write(firstOcc^,4);
+				end;
 			end;
 		end;
-		
 	except
 		on E:Exception do begin writeln(' EX=',E.message,' in occtable.InvalidateEntry'); result:=-321; end;
 		on EStreamError do result:=-309;
@@ -812,7 +798,7 @@ begin
 	if ro or (occStream=NIL) then EXIT;
 	occStream.Seek(0,soFromBeginning);
 	store:=TFileStream.Create(myFileName,fmCreate);
-	if occStream.Size<nextKey then n:=occStream.Size else n:=nextKey;
+	if occStream.Size and $FFFFFFFF < nextKey then n:=occStream.Size and $FFFFFFFF else n:=nextKey;
 	store.CopyFrom(occStream,n);
 	store.Free;
 end;

@@ -21,7 +21,7 @@
 <td width="20%"><a href="http://sourceforge.net/projects/ioda/">&bull; Project Page</a></td>
 </tr></table>
 <br>
-<p>ioda is a fulltext database written in Pascal. It is a word eating and retrieving engine: It stores unique words from a file or database source in a btree and their repeaters in an flexible and highly space optimized list structure. Each stored word "knews" its source, position in the source and some (optional) info bytes. </p>
+<p>ioda is a fulltext database written in Pascal. It is a word eating and retrieving engine: It stores unique words from a file or database source in a btree and their repeaters in an flexible and highly space optimized list structure. Each stored word "knews" its source, position in the source and some (optional) info bytes. The recent release 1.1 offers new support of UTF-8 charset and has a PHP-interface to its library. <span style="color:brown">It will be available as soon as SourceForge's Upload Server will be disponable! (Server is temporary out of disk space)</span></p>
 
 <p class="zue">Master and Slave</p>
 <p>ioda can be used stand alone ("master mode") for archiving files. In this case it stores full file names and can archive whole directory trees by one call. On the other hand, ioda can be used as an add on to an existing (i.e. SQL) database in a "slave mode". Therefore it stores the primary (or unique) key of each database record as references to its words.</p>
@@ -30,31 +30,31 @@
 <p>For retrieving information, ioda handles logical operators (AND, OR, NOT, NEAR),  parenthesis and optional word distance values (ie. AND.4). NEAR is an operator which means AND.50. The query parser of ioda is able to optimize a search path for complex queries like "(Albert or Alfred) and.1 Einstein) and Quant* not Physik*".</p>
 
 <p class="zue">Delete and Update Functions</p>
-<p>ioda can delete entries and update them by deleting the old version and inserting the new one. (Entries means the logical word list of an article, a file etc.) ioda offers a merge function for merging two databases into one or for optimization purposes. In the last case, an existing database will be rebuilded with continuous word lists (which are impossible to create in the orginal archiving run without wasting much disk space).</p>
+<p>ioda can delete entries and update them by deleting the old version and inserting the new one. (Entries means the alist of words from an article, a file etc.). ioda offers a merge function for merging two databases into one or for optimization purposes. In the last case, an existing database will be rebuilded with continuous word lists (which are impossible to create in the orginal archiving run without wasting much disk space).</p>
 
 <p class="zue">Sorting by Relevance</p>
 <p>There are some more features: ioda can sort hits by time (of file or database entry) or by weight. In the last case words (or combinations while using the AND operator) are appraised by their position in the text.  ioda can (optionally) detect text doublettes by MD5 checksums and can ignore them or store them in an space optimized way.</p>
 
-<p class="zue">ISO-8859 Charsets</p>
-<p>At the moment, ioda can handle all ISO-8859-XX charsets. Queries can be made in UTF-8 as long as they can be translated into a 256 byte charset. An enhancement to Unicode is planned when the Pascal compiler supports it.</p>
+<p class="zue">Supports ISO-8859 Charsets and <span style="background-color:#ffffA0;">UTF-8</span><span style="background-color:#ffffA0; vertical-align:super; color:red">NEW!</span></p>
+<p>ioda can handle all ISO-8859-XX charsets and UTF-8. In the case of ISO charsets ioda can handle the casefolding (optional automatic uppercase function). While using UTF-8 the calling application has to handle all casefoldings. </p>
 
 <p class="zue">Flexible Indexing through external Filters</p>
-<p>For archiving whole directory trees, ioda needs support of an external program. This can be written in any language and may work as pipeline or may generate temporary files. ioda can store additional information on each word. Beside source id and position in the source, each word can have a timestamp and more byte infos.</p>
+<p>For archiving whole directory trees, ioda needs support of an external program. This can be written in any language and may work as pipeline or may generate temporary files. ioda can store additional information on each word. Beside the mandatories (source id, source position and a 16-bit-value for flags and other informations), each word can optionally have a timestamp and a 32-bit-value (insteadt of the 16-bit one).</p>
 
 <p class="zue">Tailor-made Data Structures</p>
 <p>The database structure of ioda consists of two or three parts, which are all designed by the author (non standard):</p>
 <ol>
-<li>The Bayer Baum (Btree, *.bay ): It stores all unique words, each poiting to... </li>
+<li>The Bayer Baum (*.btf ): It stores all unique words, each poiting to... </li>
 <li>The Word occureny list (*.ocl): It stores information about the words, at least the file or database id (ie. primary key) as doubleword, the position (in word counts) in a word, the weight (can be  influenced by the external archiving process see above) and an optional info byte. This can store information like "word is in title" or something else. ioda offers bigger data models for the occurency list, ie. for storing a timestamp in each word or a source information. This bigger structures are mainly used for ioda stand alone duties. </li>
 <li>The File reference list (*.ref) is used for stand alone service only. In this case, ioda manages the ids itself ("master mode") and the ids point to the entries in the fileref list (instead of getting ids from a master database). In the fileref list, a full path name is stored. It is possible to agree upon a base path at creating time of the ioda database which is a leading part of the full path and can be truncated (ie. a webserver root path) to avoid redundant information.</li>
 </ol>
 
-<p class="zue">Program, Server, Library and CGI programm</p>
+<p class="zue">Program, Server, Library, CGI app and Interfaces for C, Perl, Python and <span style="background-color:#ffffA0;"> PHP</span><span style="background-color:#ffffA0; vertical-align:super; color:red">NEW!</span></p>
 <p>From the source, four binaries can be builded:</p>
 <ol>
 <li>ioda as a command line programm (joda)</li></li>
 <li>ioda as a server for client/server communicating over TCP sockets (jodad)</li>
-<li>ioda as a linkable library (libjodafulltext.so, interfaces to Perl and Python are published with the source)</li>
+<li>ioda as a linkable library (libjodafulltext.so). Interfaces to C, Perl, Python and PHP are published within the source package)</li>
 <li>ioda as a CGI programm (only a trunc is published which does no HTML-formatting)</li>
 </ol>
 

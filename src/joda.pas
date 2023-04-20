@@ -18,10 +18,10 @@ program joda;
 *)
 
 uses
-	CMEM,Classes,SysUtils,JStrings,ConfigReader,Volltext2;
+	CMEM,Classes,SysUtils,JStrings,ConfigReader,Volltext;
 
 const
-	version			=	'3.2';
+	version			=	'3.3';
 type
 	EConfigError	=	class(Exception);
 
@@ -61,7 +61,12 @@ begin
 		res:=cfg.ReadConfigFile(db);
 		if res<=0 then raise EConfigError.Create('Fehler beim Lesen der Konfigurations-Datei "'+db+'" - Code='+IntToStr(res));
 		res:=0;
-		vt:=TVolltext.Create(db,undefinedOpenMode,res);
+	    (*
+		 *  use openMode from cfg, this might have been overridden on the
+		 *  commandline
+		 *  (was: undefinedOpenMode)
+		 *)
+		vt:=TVolltext.Create(db,TDBMode(cfg.Int['openMode']),res);
 		if res<>0 then raise EConfigError.Create('Fehler beim Öffnen der Datenbank "'+db+'" - Code='+IntToStr(res));
 
 		if cfg.Bool['-x'] or cfg.Bool['-xu'] or cfg.Bool['-q'] or cfg.Bool['-qu'] then begin

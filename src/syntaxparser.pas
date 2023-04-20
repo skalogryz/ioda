@@ -32,7 +32,7 @@ uses
 
 const
 	maxFind		=	$10000;				// maximale Treffer in einem Zwischenergebnis
-//	charsPerWord=	16;					// s.u. nur für alte DB
+	tSPStringLen=  115;					// entspricht dem Wert aus BTreeFlex
 	ANDSTR		=	'AND';
 	ORSTR			=	'OR';
 	NOTSTR		=	'NOT';
@@ -43,13 +43,13 @@ const
 
 type
 	TOp		=	(NOP,NICHT,UND,ODER,ARG);
-
+	TSPString=  string[tSPStringLen]; 
 	PParsEl	=	^TParsEl;
 	TParsEl	=	record
 						l,r		:	PParsEl;
 						hits		:	longint;
 						case op	:	TOp of
-						  arg		:  (value:string[31]; strict:boolean);
+						  arg		:  (value:TSPString; strict:boolean);
 						  nop,
 						  nicht,
 						  und,
@@ -73,7 +73,7 @@ type
 						PROTECTED
 						root		:	PParsEl;
 						such		:	PChar;
-						suchlen	:	word;
+						suchlen	:	integer;
 						oberflau,
 						dummynode:	boolean;
 
@@ -124,8 +124,6 @@ constructor TParser.Create(var s:string; var res:integer);
 	end;
 
 
-const
-	qToggle	:	boolean	=	false;
 var
 	i,j,k,worte	:	integer;
 begin
@@ -311,13 +309,15 @@ end;
 
 function TParser.Postfix:boolean;
 var
-	v				:	PChar;
-	oldlen,i,j,k:	word;
+	v			:	PChar;
+	oldlen	:	integer;
+	i,j,k		:	word;		// Underflow-Effekt benutzt (=> $FFFF), daher keine 32-Bit-Integer verwenden!
+
 
 
 	procedure rPars(r,t:word);
 	var
-		s	:	string[31];
+		s	:	TSPString;
 		ch	:	char;
 		b	:	boolean;
 	begin
@@ -356,7 +356,7 @@ var
 					if i-k<12 then
 					begin
 						move(such[k],s[1],i-k); s[0]:=char(i-k);
-						if such[i]<>#32 then dec(i);	{ JO 19.7.95 }
+						if such[i]<>#32 then dec(i);
 					end;
 				end;
 
@@ -385,7 +385,7 @@ begin
 	i:=$FFFF; j:=$FFFF;
 	rPars(0,0);
 	freemem(such,suchlen+1);
-	suchlen:=strLen(v);
+	suchlen:=integer(strLen(v));
 	getmem(such,suchlen+1);					{ Speicherplatz aktualisieren }
 	strCopy(such,v);		   				{ neues SUCH zuweisen }
 	freemem(v,oldlen);
@@ -398,9 +398,8 @@ var
 	cstack,
 	stack		:	TPtrStack;
 	el,l,r	:	PParsEl;
-	s			:	string[31];
-	i,j,k,
-	cc			:	word;
+	s			:	TSPString;
+	i,j,k,cc	:	integer;
 	ok			:	boolean;
 	ch			:	char;
 
@@ -454,7 +453,7 @@ begin
 			with el^ do
 			begin
 				op:=ARG;
-				if i-j<=31 then k:=i-j else k:=31;
+				if i-j<=tSPStringLen then k:=i-j else k:=tSPStringLen;
 				move(such[j],value[1],k); value[0]:=char(k);
 				value:=Trim(value);
 				if (length(value)=0) or (value='*') then 

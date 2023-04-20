@@ -23,7 +23,7 @@ program JodaCGI;
 *)
 
 uses
-	Classes,ezCGI,SysUtils,JStrings,Volltext2;
+	Classes,ezCGI,SysUtils,JStrings,Volltext;
 
 type
 	EConfigError	=	class(Exception);

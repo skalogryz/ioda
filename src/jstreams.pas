@@ -40,11 +40,16 @@ IMPLEMENTATION
 constructor TLargeMemoryStream.Create(initSize,allocSize:longint);
 begin
 	inherited Create;
-	iSize:=initSize;
-	aSize:=allocSize;
-	if aSize=0 then aSize:=8192;
-   if initSize>0 then SetSize(initSize);
-// writeln('CAP=',size);
+	if allocSize=0 then 
+		aSize:=8192
+	else 
+		aSize:=(allocSize shr 12 + 1) shl 12;
+
+   if initSize>0 then begin
+		iSize:=(initSize  shr 12 + 1) shl 12;
+		SetSize(iSize);
+	end else
+		iSize:=0;
 end;
 
 
@@ -56,10 +61,11 @@ end;
 
 function TLargeMemoryStream.ReAlloc(var newCapacity: Longint): Pointer;
 begin
+// system.write(size:12,' ',newcapacity:12);
 	if newCapacity>0 then 			// round off to block size.
    	newCapacity := (newCapacity + (aSize-1)) and not (aSize-1);
  	result:=inherited ReAlloc(newCapacity);
+// writeln(' => ',newCapacity:12);
 end;
-
 
 end.

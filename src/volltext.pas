@@ -1,4 +1,4 @@
-unit Volltext2;
+unit Volltext;
 {
 	Das Unit Volltext verbindet die Module Bayerbaum (bayBaum), Vorkommensliste (occTable) 
 	und Dateiliste (fileRef) zu einer Datenbank. Es nutzt einen Parser (syntaxParser), der
@@ -27,9 +27,11 @@ unit Volltext2;
 	jo 01/2004   Doubletten jetzt dreistufig: 0 normal archivieren, 1: mit Erstobjekt verketten, 2: ignorieren
 	jo 05/2004   Höhere Effizienz: occtable (und Schnittstelle dazu) komplett neu geschrieben, idList geringfügig erweitert
 	jo 09/2004   Released under LGPL
+	jo 01/2005   New BTree format: Flexible String length up to 115 Chars, smaller data, faster code.
+					 ! joda ist now UTF-8 compatible !
 }
 
-(* Copyright (C) 1994-2004  jo@magnus.de
+(* Copyright (C) 1994-2005  jo@magnus.de
    This library is free software; you can redistribute it and/or modify it 
 	under the terms of the GNU Lesser General Public License as published by
 	the Free Software Foundation; either version 2.1 of the License, or 
@@ -49,8 +51,8 @@ unit Volltext2;
 INTERFACE
 uses
 	Classes,Dos{$IFDEF LINUX},BaseUnix,Unix{$ENDIF},SysUtils,
-	JStrings,Bayerbaum,SBayerbaum,OccTable3,fileRefs,SyntaxParser,DirScanner,
-	IdList,Logbook,ConfigReader,RegExprO,MD5,Unicode;
+	JStrings,BtreeFlex,OccTable,fileRefs,SyntaxParser,DirScanner,
+	IdList,Logbook,ConfigReader,RegExpr,MD5,Unicode,HitList;
 	
 const
 	sortByWeight 		 = 1;
@@ -78,7 +80,11 @@ type
 									// mehrere Bittests möglich, siehe unter "BTest"
 									// maxTreffer<0: Flag for UTF-8 decoding required, maxTreffer:=abs(maxTreffer)
 // Einfüge-Methoden
-						function InsertWords(worte:TStringList; fname,datum,md5Sum:string; info: cardinal; var id:cardinal):integer; 
+                  function ChainDuplicate(fname:string; lastID:cardinal; var id:cardinal): integer;
+						         // externe schnittstelle zum verketten von doubletten
+						         // wird über libjodafulltext exportiert und vom python interface verwendet
+
+                  function InsertWords(worte:TStringList; fname,datum,md5Sum:string; info: cardinal; var id:cardinal):integer; 
 									// Insert-Schnittstelle zu aufrufenden *Pascal*-Programmen und intern benutzt
 									// datum darf leer sein, dann wird das Tagesdatum eingesetzt
 									
@@ -132,29 +138,45 @@ type
 						function InvalidateEntryFromProgram(inFile:string; id:cardinal):integer;
 									// Lösch-Schnittstelle zu bel. Programmen, Datei (txt, html u.a.) wird über cfg['execProg'] geparst und Worte gelöscht
 									// tmpFile sollte bei Linux leer sein (=Pipe)
+						// s=issuePattern[,issuePreferred]: setzt ThirdLevelCheck auf Ausgabensortierung 
+						// und ggf. auf bevorzugte Ausgabe um bzw. bei Leerstring wieder zurück.
+						// issuePreferred='': reine alphabetische Sortierung ohne bevorzugte Ausgabe.
+						// BOTH are regexes!
+						procedure   SetSortedResults(const s:string);	// jo 31.1.2003
+						// added by ograf 28.10.2004
+						//
+						// better SetSortedResults interfaces without parsing
+						// and added version without regex but
+						// offset and length
+						//
+						procedure   SetSortedResults(const pattern, preferred: string);
+						procedure   SetSortedResults(const offset, length: integer; preferred: string);
 
 						PROTECTED
-						treffer,
+						treffer			:	THitList;
+						tmpdup			:	TDupSortList;
 						unworte			:	TStringList;
 						btree				:	TBaybaum;
 						occ				:	TClusterMaster;
 						fileRef			:	TfileRef;
 						secunda			:	TVolltext;
 						log				:	TLogbook;
-						reg				:	TRegEx;
+						reg				:	TRegExpr;
 						ThirdLevelCheck:	TThirdLevelCheck;
 						fileList			:	THash;
 						utf8Decoder		:	TUTF8Decoder;
+						issueOffset,
+						issueLength		:	integer;
+						issuePattern,
+						issuePreferred,
 						dbName,
 						basePathName,
 						fFilter,
-						issuePattern,
-						issuePreferred,
 						tmpFile,
-						execProg   	   : 	string;
+						execProg			: 	string;
 						vlbFilterNum,
-						rres				:  integer;
-						vlbFilter		:  PByte;
+						rres				:	integer;
+						vlbFilter		:	PByte;
 						maxFind,
 						currentDiff,
 						btreeCapacity,
@@ -177,13 +199,11 @@ type
 						recycling,
 						fFilterFilter,
 						useLog,
-						useWordFilter	:	boolean;
+						useWordFilter,
+						followLinks,
+						caseSensitive	:	boolean;
 						currentOp		:	TOp;
 
-						procedure   SetSortedResults(const s:string);	// jo 31.1.2003
-									// s=issuePattern[,issuePreferred]: setzt ThirdLevelCheck auf Ausgabensortierung 
-									// und ggf. auf bevorzugte Ausgabe um bzw. bei Leerstring wieder zurück.
-									// issuePreferred='': reine alphabetische Sortierung ohne bevorzugte Ausgabe.
 						function    GetSortedResultMode:string;
 						function		TellError:integer;
 						function 	Age95(const datum:string):longint;
@@ -195,8 +215,12 @@ type
 						function 	ThirdLevelCheck_WithoutFileRef(id,datum,gewicht,info:cardinal):boolean;
 						function 	BTest(info:cardinal):boolean;
 						function		GetTreffer(i:integer):string;
-						function 	InsertWord(s:string; fid,fpos,info,wcount:cardinal; age:word):integer; 
-						function 	GetWordsFromProgram(inFile:string; var id:cardinal; var worte:TStringList):integer;
+						function		GetTrefferPtr(i	: integer):PHit;
+						function		GetAllTrefferPtr():PHitArray;
+						function		GetTrefferCount():integer;
+						function 	CountC(count,wcount:cardinal):cardinal;
+						function 	InsertWord(s : string; fid,fpos,info,wcount:cardinal; age:word):integer; 
+						function 	GetWordsFromProgram(inFile:string; var worte:TStringList):integer;
 
 						function		ScanCluster_WithFileRef(const wort:string; var key,optimized,checked:cardinal; 
 																	   const idList:TDWList; minAge:word):integer;
@@ -205,96 +229,27 @@ type
 						function 	InvalidateWord(s:string; fid:cardinal):integer;	// Löschen einzelner Worte
 						
 						PUBLIC
+						query		:	AnsiString;
 						property		Suchergebnis[i:integer]:string read GetTreffer; DEFAULT;
-						property    SortIssues:string read GetSortedResultMode write SetSortedResults;
-						property		Error:integer read TellError;
-						property		MaxNumsPerWord:integer read maxNums write maxNums;
-						property		BasePath:string read basePathName write basePathName;
-						property    DatabaseName:string read dbName;
-					end;
+						property		HitPtr[i:integer]:PHit read GetTrefferPtr;
+						property		HitArrayPtr	: PHitArray read GetAllTrefferPtr;
+						property		HitCount:integer read getTrefferCount;
+						property    SortIssues	: string read GetSortedResultMode write SetSortedResults;
+						property		Error		   : integer read TellError;
+						property		MaxNumsPerWord : integer read maxNums write maxNums;
+						property		BasePath	   : string read basePathName write basePathName;
+						property    DatabaseName: string read dbName;
+					end;						   
 
 
 IMPLEMENTATION
 const
-	maxTitelLen		=	1024;
-	maxGewicht		=	  63;						// max. möglicher Wert im Feld "Gewicht"
-	maxRelGewicht	= 	  15;						// maximaler Wert, der als relatives Gewicht vergeben wird
+	maxTitelLen	=	1024;
 	nonos :	set of char	= ['.',#44,';','!','?','=','"',#39,'/',':','-','`','*','+','\','<','>','|','(',')','[',']','{','}','&','÷'];	
 	zahlen:	set of char = ['0'..'9'];
 	overStr: array[boolean] of string = ('',' OVERFLOW');
 	defaultMaxNums =	10;
 
-
-type
-	TFileRefs=	class(TStringList)
-						PUBLIC
-						constructor Create(const pattern:string); VIRTUAL;
-						destructor  Destroy; OVERRIDE;
-						function 	IndexOf(const pattern:string):integer;	OVERRIDE;
-						
-						PROTECTED
-						reg	:	TRegEx;
-						
-						PUBLIC
-						property regEx:TRegEx read reg;
-					end;
-
-
-
-// Hilfsklasse zur Dateilisten-Speicherung mit Zusatzsortierung per RegEx
-constructor TFileRefs.Create(const pattern:string);
-begin
-	inherited Create;
-	sorted:=false; duplicates:=dupIgnore;
-	reg:=TRegEx.Create(pattern);
-end;
-
-
-destructor TFileRefs.Destroy;
-begin
-	reg.Free;
-	inherited Destroy;
-end;
-
-
-function TFileRefs.IndexOf(const pattern:string):integer;
-var
-	i	:	integer;
-	r	:	TRegEx;
-begin
-	result:=-1;
-	r:=TRegEx.Create(pattern);
-	
-	for i:=0 to count-1 do
-	begin
-		if r.Match(strings[i]) then begin  
-			result:=i; break;
-		end;
-	end;
-	
-	r.Free;
-end;
-
-
-// Sortierfunktion dazu (wird über TStringList.CustomSort via ProcVar aufgerufen, darf leider keine Methode sein):
-function FileRefCompare(list:TStringList; i1,i2:integer):integer;
-var
-	s1,s2	:	string[127];
-	p1,p2,
-	l1,l2	:	integer;
-	l		:	TFileRefs;	
-begin
-	result:=0;
-	l:=list as TFileRefs;
-	if ((i1=i2) or (not l.regEx.MatchPos(l[i1],p1,l1)) or (not l.regEx.MatchPos(l[i2],p2,l2))) then EXIT;
-	s1:=copy(l[i1],p1,l1);
-	s2:=copy(l[i2],p2,l2);
-	if s1>s2 then
-		result:=1
-	else if s1<s2 then
-		result:=-1
-end;
-	
 
 // Volltext-Klassenbester
 constructor TVolltext.Create(const db:string; mode:TDbMode; var res:integer);
@@ -326,10 +281,12 @@ begin
 	occGrowSize		:= cfg.Int['occGrowSize'];
 	usefileRef_		:= cfg.Int['useFileref'];
 	recycling		:= cfg.Int['enableRecycling']=1;
+	followLinks		:=	cfg.Int['followLinks']=1;
+	caseSensitive	:=	cfg.Int['caseSensitive']=1;
 	globalInfoBits := cardinal(not cfg.Int['localInfoBits']); // Default ist $FFFFFFFF (alle InfoBits wirken Synonym-global)
 	opeNed			:=	0;
 	
-	fileRef:=NIL; occ:=NIL; btree:=NIL; treffer:=NIL; fileList:=NIL;
+	fileRef:=NIL; occ:=NIL; btree:=NIL; treffer:=NIL; tmpdup:=NIL; fileList:=NIL;
 	unworte:=NIL; 	log:=NIL; reg:=NIL; utf8Decoder:=NIL; rres:=0; 
 	DateSeparator:='.'; ShortDateFormat:='dd.mm.yyyy'; 
 	log:=TLogbook.Create(db+'.log',10000,res);
@@ -349,6 +306,7 @@ begin
 	if FileExists(db+'.unworte.txt') then unworte.LoadFromFile(db+'.unworte.txt');
 
 	issuePattern:=''; issuePreferred:='';
+	issueOffset:=0; issueLength:=0;
 	if useFileRef_>0 then
 		ThirdLevelCheck:=@ThirdLevelCheck_WithFileRef
 	else
@@ -376,6 +334,7 @@ begin
 	btree.Free;
 	fileList.Free;
 	treffer.Free;
+	tmpdup.Free;
 	unworte.Free;
 	if useLog then log.Add('Database is now closed. Thank you for using joda!',true);
 	log.Free;
@@ -394,7 +353,6 @@ begin
 			btree:=TMemBaybaum.Create(dbName,btreeCapacity,btreeGrowSize,ro,result)
 		else
 			btree:=TFileBaybaum.Create(dbName,ro,result);
-
 		if result=0 then begin  
 			occ:=TClusterMaster.Open(dbName,useBigOccList_,occCapacity,occGrowSize,ro,recycling,result);
 			if (result=0) and (usefileRef_>0) then begin  
@@ -405,7 +363,7 @@ begin
 			end;
 		end;
 	except
-		on E:Exception do result:=-614
+		on E:Exception do result:=-616
 	end;
 	if result=0 then begin  
 		if useLog then log.Add('*** Database is now open ('+IntToStr(opeNed)+'. time) ***',true)
@@ -425,16 +383,51 @@ end;
 
 procedure TVolltext.SetSortedResults(const s:string);
 var
-		a	:	array[0..1] of string;
-		n	:	integer;
+	a : array[0..1] of string;
+	n : integer;
 begin
 	if useFileRef_=0 then EXIT;
-	issuePattern:= ''; issuePreferred:='';
-
-	if s<>'' then begin  
+	issuePattern:='';
+	issuePreferred:='';
+	issueOffset:=0;
+	issueLength:=0;
+	if s<>'' then begin
 		n:=split(s,',',a);
 		issuePattern:=a[0];
 		if (n>0) then issuePreferred:=a[1];
+		ThirdLevelCheck:=@ThirdLevelCheck_WithSortedFileRef;
+	end else
+		ThirdLevelCheck:=@ThirdLevelCheck_WithFileRef;
+end;
+
+
+procedure TVolltext.SetSortedResults(const pattern, preferred: string);
+begin
+	if useFileRef_=0 then EXIT;
+	issuePattern:= '';
+	issuePreferred:='';
+	issueOffset:=0;
+	issueLength:=0;
+	if pattern<>'' then begin
+		issuePattern := pattern;
+		issuePreferred := preferred;
+		ThirdLevelCheck:=@ThirdLevelCheck_WithSortedFileRef;
+	end else
+		ThirdLevelCheck:=@ThirdLevelCheck_WithFileRef;
+end;
+
+
+procedure TVolltext.SetSortedResults(const offset, length: integer; preferred: string);
+begin
+	if useFileRef_=0 then EXIT;
+	issuePattern:= '';
+	issuePreferred:='';
+	issueOffset:=0;
+	issueLength:=0;
+	if (length>0) and (offset>0) then begin
+		issueOffset:=offset;
+		issueLength:=length;
+		issuePreferred:=preferred;
 		ThirdLevelCheck:=@ThirdLevelCheck_WithSortedFileRef;
 	end else
 		ThirdLevelCheck:=@ThirdLevelCheck_WithFileRef;
@@ -509,6 +502,7 @@ var
 begin
 	with parsEl do
 	begin
+		if not caseSensitive then value:=AnsiUpperCase(value);
 		if unworte.Find(value,i) then
 			hits:=maxlongint              		// Flag für 'nicht weiter prüfen' 
 		else
@@ -526,7 +520,7 @@ var
 begin
 	fop    := vlbFilter;
 	fval   := vlbFilter + 1;
-	result := (fop^ AND $80) <> 0;
+	result := (fop^ AND $c0) <> 0;
 
 	for i := 1 to vlbFilterNum do begin
 		vbyte := fval^;
@@ -585,7 +579,9 @@ begin
 		end;
 		end; { case }
 
-		if (fop^ AND $80<>0) then
+		if ((fop^ AND $40<>0) AND (result=false)) then break; { shortcut and }
+		
+		if (fop^ AND $c0<>0) then
 			result:=result AND res
 		else
 			result:=result OR res;
@@ -610,14 +606,12 @@ begin
 		currentList:=NIL; 					// Hilfsliste für UND-Op.
 
 	if strict then	btree.GetEqual(s,NIL) else	btree.GetAlike(s,NIL);
-	for i:=0 to btree.Count-1 do 
-	begin
+	for i:=0 to btree.Count-1 do begin
+		if btree[i].dp = 0 then Continue;
 		occ.GetItemList(btree[i].dp,NIL,false);
-		for j:=0 to occ.Count-1 do 		// id=dw1, pos=dw2, datum=dw3, gewicht=dw4, info=dw5
-		begin
+		for j:=0 to occ.Count-1 do begin		// id=dw1, pos=dw2, datum=dw3, gewicht=dw4, info=dw5
 			el:=occ[j];
-			with el do 							// ehemalige Funktion "SecondLevelCheck"
-			begin
+			with el do begin						// ehemalige Funktion "SecondLevelCheck"
 				if (dw3>=dStart) and (dw3<=dStop) and ((vlbFilterNum=0) or BTest(dw5)) then 
 				case currentOp of
 					NOP,
@@ -640,49 +634,30 @@ end;
 
 function TVolltext.ThirdLevelCheck_WithSortedFileRef(id,datum,gewicht,info:cardinal):boolean;
 var
-	tmp			:	TFileRefs;
 	name,titel	:	string;
-	e,i			:	integer;
+	e			:	integer;
 begin
 	result:=false; 
 	if rres>maxFind then EXIT;						// hier werden Doubletten NICHT mitgezählt!
-	
-	tmp:=TFileRefs.Create(issuePattern);
-	name:=fileRef[id]; titel:=fileRef.titel[id]; 
+
+	name:=fileRef[id]; titel:=fileRef.titel[id];
 	e:=fileRef.Error; 
 	if (e=0) and (name<>'') then begin  
 		inc(rres);
-		while (e=0) and (name<>'') do
-		begin
+		while (e=0) and (name<>'') do begin
 			if ((fFilter='') or 
-				(((reg=NIL) and (pos(fFilter,name)>0)) or ((reg<>NIL) and (reg.Match(name))))<>fFilterFilter) then
-				tmp.Add(name+#9+titel+#9+IntToStr(datum)+#9+IntToStr(gewicht)+#9+IntToStr(info));
+				(((reg=NIL) and ((pos(fFilter,name)>0)<>fFilterFilter)) or ((reg<>NIL) and (reg.Exec(name)<>fFilterFilter)))) then
+				tmpdup.AddWithFileRef(name,titel,id,datum,gewicht,info);
 			name:=fileRef[0];		// ggf. Doubletten holen
 			e:=fileRef.Error;
 		end;
 	end;
-	
-	if tmp.Count>1 then begin  
-		tmp.CustomSort(@FileRefCompare);
-		if issuePreferred<>'' then begin  		// eine Ausgabe soll an den Anfang der Liste
-			i:=tmp.IndexOf(issuePreferred);
-			if (i>0) then begin  					// ggf. nach vorne stellen
-				name:=tmp[i];
-				tmp.Delete(i);
-				tmp.Insert(0,name);
-			end;
-		end;
-	end;
-
-	for i:=0 to tmp.Count-1 do 
-	begin
-		treffer.Add(tmp[i]+#9+IntToStr(i)); 	// hier kommt die Doubletten-Info als 6. Feld hinzu
-	end;
-	tmp.Free;
+	tmpdup.CustomSort;
+	treffer.AddDuplicates(tmpdup);
+	tmpdup.ClearList;
 	
 	if e<>0 then vtError:=e else result:=true
 end;
-
 
 
 function TVolltext.ThirdLevelCheck_WithFileRef(id,datum,gewicht,info:cardinal):boolean;
@@ -691,18 +666,19 @@ var
 	e				:	integer;
 begin
 	result:=false;
-	if treffer.Count>maxFind then EXIT;
+	if rres>maxFind then EXIT;
 	
 	name:=fileRef[id]; titel:=fileRef.titel[id];
-	e:=fileRef.Error; 
-	while (e=0) and (name<>'') and (treffer.Count<=maxFind) do
-	begin
-		inc(rres);
-		if ((fFilter='') or 
-			(((reg=NIL) and (pos(fFilter,name)>0)) or ((reg<>NIL) and (reg.Match(name))))<>fFilterFilter) then
-			treffer.Add(name+#9+titel+#9+IntToStr(id)+#9+IntToStr(datum)+#9+IntToStr(gewicht)+#9+IntToStr(info));
-		name:=fileRef[0];		// ggf. Doubletten holen
-		e:=fileRef.Error; 
+	e:=fileRef.Error;
+	if (e=0) and (name<>'') then begin  
+		inc(rres); // count duplicates only one time. same as for sortedrefs
+		while (e=0) and (name<>'') do begin
+			if ((fFilter='') or 
+				(((reg=NIL) and ((pos(fFilter,name)>0)<>fFilterFilter)) or ((reg<>NIL) and (reg.Exec(name)<>fFilterFilter)))) then
+				treffer.AddWithFileRef(name,titel,id,datum,gewicht,info);
+			name:=fileRef[0];		// ggf. Doubletten holen
+			e:=fileRef.Error; 
+		end;
 	end;
 
 	if e<>0 then vtError:=e else result:=true
@@ -716,7 +692,7 @@ begin
 	else
 	begin
 		inc(rres);
-		treffer.Add(IntToStr(id)+#9+IntToStr(datum)+#9+IntToStr(gewicht)+#9+IntToStr(info));
+		treffer.AddWithOutFileRef(id,datum,gewicht,info);
 		result:=true;
 	end;
 end;
@@ -741,7 +717,6 @@ begin
 end;
 
 
-
 function TVolltext.vlSuche(var such	: string; const von,bis,fileFilter:string; bitFilter:PByte; bitFilterNum,maxTreffer,sortOrder:integer; var overflow:boolean):integer;
 var
 	parser	:	TParser;
@@ -763,13 +738,20 @@ begin
 		overflow:=false; 
 		maxFind:=maxTreffer;
 		treffer.Free; 
-		treffer:=TStringlist.Create;
-		treffer.Sorted:=false; treffer.Duplicates:=dupIgnore;
+		treffer:=THitlist.Create(maxTreffer);
+		tmpdup.Free;
+		tmpdup:=NIL;
+		if ThirdLevelCheck = @ThirdLevelCheck_WithSortedFileRef then
+			if issueOffset>0 then
+				tmpdup:=TDupSortList.Create(issueOffset,issueLength,issuePreferred)
+			else
+				tmpdup:=TDupSortList.Create(issuePattern,issuePreferred);
 
 		parser:=TParser.Create(such,res);
 		if res=0 then begin  
-			if von='' then dStart:=0 	  else dStart:=Age95(von);
-			if bis='' then dStop :=$FFFF else dStop :=Age95(bis);
+
+			if von='' then dStart:=0 	  else dStart:=word(Age95(von));
+			if bis='' then dStop :=$FFFF else dStop :=word(Age95(bis));
 			vlbFilterNum:=bitFilterNum shr 1;
 			vlbFilter:=bitFilter;
 			fFilter:=fileFilter;
@@ -781,9 +763,10 @@ begin
 				
 			if (pos('REGEX=',fFilter)=1) or (pos('REGEX_',fFilter)=1) then begin  
 				fFilter:=copy(fFilter,7,length(fFilter)-6);
-				reg:=TRegEx.Create(fFilter);
+				reg:=TRegExpr.Create;
+				reg.Expression:=ffilter;
 			end;
-			
+
 			parser.Optimizer(@EvaluateHits);	 			 	// mit "Unworten" abgleichen, Häufigkeiten ermitteln und SuchBaum optimieren
 			parser.Trigger(@FirstLevelCheck,sortOrder);	// Suche in zwei Ebenen ausführen (inkl. Datums- und Bytefilter anwenden)
 			for i:=0 to parser.Count-1 do	ThirdLevelCheck(parser[i],parser.info1[i],parser.info2[i],parser.info3[i]); // Filefilter anwenden und Ergebnisse speichern
@@ -792,7 +775,9 @@ begin
 			vtError:=res;
 			
 		reg.Free; reg:=NIL;
+		tmpdup.Free; tmpdup:=NIL;
 		parser.Free;
+		query:=such;
 		log.Add('Suche nach '+such+' von '+von+' bis '+bis+' fFilter='+fileFilter+
 		        ' bFilterLen='+IntToStr(vlbFilterNum)+' hatte '+IntToStr(treffer.Count)+
 				  ' ('+IntToStr(maxTreffer)+') Treffer.'+overStr[overflow],true);
@@ -810,42 +795,75 @@ begin
 end;
 
 
+function	TVolltext.GetTrefferPtr(i:integer):PHit;
+begin
+	if ((treffer<>NIL) and (i<treffer.Count)) then
+		result:=treffer.GetHitRawPtr(i)
+	else
+		result:=nil;
+end;
+
+
+function	TVolltext.GetAllTrefferPtr():PHitArray;
+begin
+	if (treffer<>NIL) then
+		result:=treffer.getHitListPtr
+	else
+		result:=nil;
+end;
+
+
+function	TVolltext.GetTrefferCount():integer;
+begin
+	if (treffer<>NIL) then
+		result:=treffer.count
+	else
+		result:=0;
+end;
+
+
 function	TVolltext.GetResultList(var list:TStringList):integer;
+var
+	i : integer;
 begin
 	if list=NIL then list:=TStringlist.Create;
 	list.Sorted:=false; list.Duplicates:=dupIgnore;
-	list.Assign(treffer);
+	for i:=0 to treffer.count-1 do
+		list.Add(treffer[i]);
 	result:=list.Count;
 end;
 
 
+function TVolltext.CountC(count,wcount:cardinal):cardinal;
+begin
+	result:=cardinal(round((count+wcount)*mapFactor));	// Faktor wird je nach mapMode im Constructor, InsertWords oder InsertWordsFromFiles bestimmt
+	if result<defCluster then result:=defCluster else if result>maxCluster then result:=maxCluster;
+end;
+
+
 function TVolltext.InsertWord(s:string; fid,fpos,info,wcount:cardinal; age:word):integer;
-var
-	i				:	longint;
+var	// hier kein UpperCase/Trim mehr!
+	i				:	integer;
 	c,count,key	:	cardinal;
+	
 begin
 	result:=-1;
-	s:=Trim(s);
 	if not Wortzeichen(s) or ((useWordFilter) and (unworte.Find(s,i))) then EXIT;
-	if btree.SearchWord(s,count,key) then begin 	// bereits bekanntes Wort
-		if key=0 then begin  
-			log.Add('Word "'+s+'" has an invalid key: '+IntToStr(key),true);
-			result:=-604; EXIT
-		end;
-	end else	begin										// erstmaliges Vorkommen des Wortes überhaupt
-		key:=0; count:=0;
+	inc(result);
+	
+	if not btree.SearchWord(s,count,key) then begin
+		key:=0; count:=0;								// erstmaliges Vorkommen eines Wortes überhaupt
 	end;
 
-	try
-		c:=round((count+wcount)*mapFactor);		// Faktor wird je nach mapMode im Constructor, InsertWords oder InsertWordsFromFiles bestimmt
-	except
-		on E:Exception do c:=defCluster
-	end;			
-	if c<defCluster then c:=defCluster else if c>maxCluster then c:=maxCluster;
-	result:=occ.InsertRecord(key,c,fid,fpos,age,info);
-	if (result=0) and not btree.Insert(s,key) then begin  	// ggf. nur Wortzähler im Baybaum erhöhen
-		log.Add('Btree-Error: '+IntToStr(btree.Error),true);
-		result:=-603;
+	c:=CountC(count,wcount);
+	if result=0 then begin
+		result:=occ.InsertRecord(key,c,fid,fpos,age,info);
+		if result=0 then begin
+			if not btree.Insert(s,key) then begin	// ggf. nur Wortzähler im Baybaum erhöhen
+				log.Add('Btree-Error: '+IntToStr(btree.Error),true);
+				result:=-614;
+			end;
+		end;
 	end;
 end;
 
@@ -853,7 +871,7 @@ end;
 function TVolltext.InsertWords(worte:TStringList; fname,datum,md5Sum:string; info:cardinal; var id:cardinal):integer;
 var
 	insList				:	TIdList;
-	a						:	array[0..3] of string;
+	a					:	array[0..3] of string;
 	s,titel				:	string;
 	info_,inf			:	cardinal;
 	age					:	longint;
@@ -909,7 +927,7 @@ begin
 
 		n:=split(s,',',a);
 		if a[0]='' then Continue;
-		s:=AnsiUpperCase(a[0]);
+		if caseSensitive then s:=Trim(a[0]) else s:=AnsiUpperCase(Trim(a[0]));
 		if n>0 then info_:=info OR StrToIntDef(a[n],0) else info_:=info; // kompatibel zu alten Filter mit Gewichtsangabe ("word,gewicht,info")
 		n:=1;
 		if insList.Find(s,j) then begin
@@ -925,12 +943,12 @@ begin
 		insList.AddIds(s,[i,info_,n]);
 	end;
 
-	s:=''; n:=1;
+	s:='';
 	for i:=0 to insList.Count-1 do				// Einfügelauf
 	try
 		if insList[i]<>s then n:=insList.ids[i][2]; // n (Häufigkeit des Wortes in der Liste) stets dem ersten Eintrag der Gleichen entnehmen
 		s:=insList[i];
-		res:=InsertWord(s,id,insList.ids[i][0],insList.ids[i][1],n,age);
+      res:=InsertWord(s,id,insList.ids[i][0],insList.ids[i][1],n,word(age));
 		if res<>-1 then begin  
 			if res<0 then begin  
 				insList.Free; 
@@ -947,7 +965,6 @@ begin
 	if words>0 then begin  
 		if useFileRef_>0 then result:=fileRef.NewFilename(fname,titel,id);
 		log.Add('File "'+fname+'" with '+IntToStr(words)+' words inserted. Res='+IntToStr(result)+' FileID='+IntToStr(id),true);
-		if result<>0 then result:=-result else result:=id;
 	end else
 	begin
 		log.Add('File "'+fname+'" fehlen die Worte (missing words after testing)',true);
@@ -956,7 +973,31 @@ begin
 end;
 
 
-function TVolltext.GetWordsFromProgram(inFile:string; var id:cardinal; var worte:TStringList):integer;
+function TVolltext.ChainDuplicate(fname:string; lastID:cardinal; var id:cardinal): integer;
+var
+	res	: integer;
+
+begin
+	if basePathName<>'' then delete(fname,1,length(basePathName));
+	if lastID<>0 then begin  
+		res:=fileRef.ChainFilename(fname,lastID,id);
+		if res=0 then begin  
+			log.Add('File '+fname+', ID='+IntToStr(id)+', chained with existing ID='+IntToStr(lastID),true);
+			result:=0;
+		end else
+		begin
+			log.Add('Chaining of File '+fname+' FAILED with Result='+IntToStr(res),true);
+			result:=res;
+		end
+	end else
+	begin
+		log.Add('File '+fname+' skipped (lastID is invalid)',true);
+		result:=-650;
+	end;
+end; { TVolltext.ChainDuplicate }
+
+
+function TVolltext.GetWordsFromProgram(inFile:string; var worte:TStringList):integer;
 var
 	s		:	THandleStream;
 	{$IFDEF LINUX}	f	:	text; {$ENDIF }
@@ -1001,7 +1042,7 @@ function TVolltext.InsertWordsFromProgram(inFile,datum:string; var id:cardinal):
 var
 	worte	:	TStringList;
 begin
-	result:=GetWordsFromProgram(inFile,id,worte);
+	result:=GetWordsFromProgram(inFile,worte);
 	if result=0 then result:=InsertWords(worte,inFile,datum,'',0,id);
 	worte.Free;
 end;
@@ -1143,14 +1184,16 @@ begin
 		if vtError<>0 then break;
 		log.Add('File '+scanner[i].name+' to be archived',true);
 {$IFDEF LINUX}		
-		if (fpStat(scanner[i].name,fInfo)>=0) then begin
-			if (fpS_ISLNK(fInfo.mode)) then begin
-				log.Add('File is a Link - skipped',true);
+		if not followLinks then begin
+			if (fpStat(scanner[i].name,fInfo)>=0) then begin
+				if (fpS_ISLNK(fInfo.mode)) then begin
+					log.Add('File is a Link - skipped',true);
+					inc(skipped); Continue;
+				end;
+			end else	begin
+				log.Add('Cannot get file info',true);
 				inc(skipped); Continue;
 			end;
-		end else	begin
-			log.Add('Cannot get file info',true);
-			inc(skipped); Continue;
 		end;
 {$ENDIF}		
 		try
@@ -1160,7 +1203,7 @@ begin
 			inc(skipped); Continue;
 		end;
 		worte:=NIL; wc:=0; md5Sum:='';
-		res:=GetWordsFromProgram(scanner[i].name,id,worte);
+		res:=GetWordsFromProgram(scanner[i].name,worte);
 		if (worte<>NIL) then wc:=worte.Count;
 		if (res<>0) then begin  
 			log.Add('Fehler (Code='+IntToStr(res)+') beim Verarbeiten der Datei '+scanner[i].name+ '(Anzahl Worte: '+IntToStr(wc)+')',true);
@@ -1369,14 +1412,14 @@ var
 	ScanCluster							:	TOptWordFunc;
 	el										:	TVal;
 	idList								:	TDWList;
-	key,dummy,n,optimized,checked :	cardinal;
+	key,dummy,n,optimized,checked	:	cardinal;
 	i,j									:	integer;
 	minAge								:	word;
 	fastMode								:	boolean;
 
 begin
 	if source<>NIL then secunda:=source;	//	für externe Aufrufer (z.B. jodad)
-	if startDatum<>'' then minAge:=Age95(startDatum) else minAge:=0;
+	if startDatum<>'' then minAge:=word(Age95(startDatum)) else minAge:=0;
 // bei reiner Optimierung ist kein REF-Handling nötig - Zieldatei neu (leer) und keine Filter angegeben:
 	fastMode:=(useFileRef_=1) and (btree.WordCount=0) and (minAge=0) and (not wordCheck) and (not fileCheck) and (not destructive);
 	if fastMode then log.Add('Using fastMode: REF file will be copied',true);
@@ -1397,9 +1440,9 @@ begin
 	for i:=0 to secunda.btree.Count-1 do 
 	begin
 		if vtError<>0 then begin  
-			result:=vtError;
-			EXIT;
+			result:=vtError; EXIT;
 		end;
+		
 		el:=secunda.btree[i];
 		if not wordCheck or (Wortzeichen(el.s) and not unworte.Find(el.s,j)) then begin  
 			if (verbose) and (i mod 1000=0) then begin   
@@ -1411,7 +1454,7 @@ begin
 			secunda.occ.GetItemList(el.dp,NIL,false);
 			ScanCluster(el.s,key,optimized,checked,idList,minAge);
 			if vtError<>0 then begin  	
-				log.Add('Error '+IntToStr(vtError)+' ['+IntToStr(fileRef.NextID)+' '+IntToStr(el.z)+'*] '+el.s,true);
+				log.Add('Error '+IntToStr(vtError)+' '+IntToStr(el.z)+' '+el.s,true);
 				vtError:=0;
 			end;
 		end else 
@@ -1450,28 +1493,26 @@ end;
 
 
 function TVolltext.InvalidateWord(s:string; fid:cardinal):integer;	// Löschen von Einträgen
-var
+var	// hier kein Trim/Uppercase mehr!
 	i				:	longint;
 	count,key	:	cardinal;
 begin
 	result:=0;
-	s:=Trim(s);
 	if not Wortzeichen(s) or unworte.Find(s,i) then EXIT;
-	if btree.SearchWord(s,count,key) then begin 			// bereits bekanntes Wort
-		if key=0 then begin  
-			log.Add('Word "'+s+'" has an invalid key: '+IntToStr(key),true);
-			result:=-604; EXIT
-		end;
+	
+	if btree.SearchWord(s,count,key) then begin 	// bereits bekanntes Wort
+		if key=0 then EXIT;
 		
 		result:=occ.InvalidateRecord(key,fid);
 		if result>0 then 
 		begin
+			if result>=integer(count) then key:=0;	// es gibt kein Vorkommen des Wortes mehr
 			if not btree.Update(s,key,-result,1) then begin		//  nur den Wortzähler im Baybaum herabsetzen
 				log.Add('Btree-Error: '+IntToStr(btree.Error),true);
-				result:=-603;
+				result:=-618;
 			end;
-		end
-	end //	else log.Add('Word "'+s+'" is not known in btree',true);
+		end;
+	end; 
 end;
 
 
@@ -1504,7 +1545,7 @@ begin
 		s:=worte[i]; 
 		if (s='') or (copy(s,1,3)='*|*') then Continue;	//	 hier irrelevante Information
 		split(s,',',a);
-		wort:=AnsiUpperCase(a[0]); 
+		if caseSensitive then wort:=Trim(a[0]) else wort:=AnsiUpperCase(Trim(a[0]));
 		if (not tmpList.Find(wort,j)) then begin
 			tmpList.Add(wort);						// Doubletten (aus unterschiedlicher Groß-/Kleinschr. und
 			res:=InvalidateWord(wort,id);			// angehängten Flags beim Laden unerkannt) erst HIER ignorieren
@@ -1536,7 +1577,7 @@ function TVolltext.InvalidateEntryFromProgram(inFile:string; id:cardinal):intege
 var
 	worte	:	TStringList;
 begin
-	result:=GetWordsFromProgram(inFile,id,worte);
+	result:=GetWordsFromProgram(inFile,worte);
 	if result=0 then result:=InvalidateEntry(worte,id);
 	worte.Free;
 end;

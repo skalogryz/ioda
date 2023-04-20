@@ -229,7 +229,7 @@ begin
 end;
 
 
-function DWordCompare5(p1,p2:pointer):integer;	// nach 1. INFO, 2. GEWICHT, 3. GEWICHT ABSTEIGEND
+function DWordCompare5(p1,p2:pointer):integer;	// nach 1. INFO, 2. GEWICHT, 3. DATUM ABSTEIGEND
 begin
 	if TDW(p1^).dw5 > TDW(p2^).dw5 then
 		result:=-1
@@ -583,9 +583,13 @@ var
 begin
 	for i:=0 to count-1 do 
 	begin
+	try
 		el:=items[i];
 		if el<>NIL then dispose(el);
 		el:=NIL;
+	except
+		on E:Exception do begin writeln('*** Exception #11C *** '+E.Message,' ',i:10,count:10); exit; end;
+	end;
 	end;
 	inherited Clear;
 	sorted:=false; oberflau:=false;
@@ -621,11 +625,17 @@ var
 begin
 	if High(kv)<0 then EXIT;
 	
-	if (Count>=max) and (sortOrd>0) then OverflowFilter; // laufende Sortierung
+	if (Count>=max) and (sortOrd>0) then begin 
+		writeln(count:10,max:10,' OVERFLOW => SORTING!');
+		OverflowFilter; // laufende Sortierung
+	end;
 	try
 		new(el);
 	except 
-		on EOutOfMemory do EXIT
+		on EOutOfMemory do begin 
+			writeln('OUT OF MEMORY IN "TDWList.Add"!');
+			EXIT
+		end;
 	end;
 
 	fillDWord(el^,sizeOf(TDW) shr 2,0);

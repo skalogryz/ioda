@@ -39,12 +39,12 @@ Program JodaD;
 *)
 
 uses 
-	CMEM,Classes,SysUtils,Linux,Sockets,JStrings,Volltext2,ConfigReader,Logbook,ioNet2;
+	CMEM,Classes,SysUtils,Linux,Sockets,JStrings,Volltext,ConfigReader,Logbook,IONet;
 	
 {$H+}
 
 const
-	version				=	'3.2';
+	version				=	'3.3';
 	defaultLogbook		=	'/var/log/apps/jodad.log';
 	defaultRcvLen		:	longint	=	$10000;		// aus Sicherheitsgründen: max. Transfervolumen für ankommende Jobs
 	jodaDefaultSocket	: 	word		=	  3359;
@@ -61,7 +61,7 @@ type
 							ro			:	boolean;
 							
 							function 	Action(const msg:string):string; OVERRIDE;
-							function 	FindDB(db:string; var i:integer):boolean;
+							function 	FindDB(db:string; var i:integer):string;
 							function 	LoadDB(const db:string):TVolltext;
 							
 							PUBLIC
@@ -90,7 +90,9 @@ begin
 	j:=cfg.ReadCommandLine;
 	logbookFN:=cfg['logbook']; if logbookFN='' then logbookFN:=defaultLogbook;
 	log:=TLogbook.Create(logbookFN,1000,res);
-	if (log=NIL) then begin writeln('Cannot create or open log "',logbookFN,'" Error: ',res); HALT(1); end;
+	if (log=NIL) then begin 
+		writeln('Cannot create or open log "',logbookFN,'" Error: ',res); HALT(1); 
+	end;
 
 	jodaSocket:=cfg.Int['socket']; if jodaSocket=0 then jodaSocket:=jodaDefaultSocket;
 	rcvLen:=cfg.Int['rcvLen']; if rcvLen=0 then rcvLen:=defaultRcvLen;
@@ -99,14 +101,10 @@ begin
 	log.Add('jodad V. '+version+' is up, listening with maxRcvLen='+IntToStr(rcvLen)+' on socket '+IntToStr(jodaSocket)+', readOnly='+BoolToStr(ro),true);
 	dbList:=TStringList.Create;
 	
-	for i:=j+1 to paramCount do 
-	begin
+	for i:=j+1 to paramCount do begin
 		db:=ChangeFileExt(paramstr(i),'');
-		if db[length(db)]<>'_' then 
-		begin
-			vt:=LoadDB(db);
-			if vt<>NIL then dbList.AddObject(db,vt);
-		end;
+		vt:=LoadDB(db);
+		if vt<>NIL then dbList.AddObject(db,vt);
 		cfg.Clear;
 	end;
 	cfg.Free;
@@ -126,19 +124,18 @@ begin
 end; 
 
 
-function TJodaDaemon.FindDB(db:string; var i:integer):boolean;
+function TJodaDaemon.FindDB(db:string; var i:integer):string;
 var
 	j	:	integer;
 begin
-	result:=dbList.Find(db,i);
-	if not result then
-	begin
+	if dbList.Find(db,i) then
+		result:=dbList[i]											// exact match
+	else begin
 		db:=ExtractFilename(db);
 		for j:=0 to dbList.Count-1 do
-		 	if ExtractFilename(dbList[j])=db then 
-			begin
-				result:=true; i:=j; EXIT;
-			end;
+		 	if ExtractFilename(dbList[j])=db then begin
+				result:=dbList[j]; i:=j; EXIT;				// match of file name w/o path
+		end;
 		i:=-1;
 	end;
 end;
@@ -177,15 +174,15 @@ end;
 
 function TJodaDaemon.Action(const msg:string):string;
 var
-	vt,secunda											:	TVolltext;
-	worte													:	TStringList;
-	such,von,bis,fFilter,bFilter,inFile,datum	:	string;
-	vlBuf													:	array[0..255] of byte;
-	a														:	array[0..9] of string;
-	id,info												:	cardinal;
-	i,n,vlCount,maxTreffer,sortOrder				:	integer;
-	cmd													:	string[3];
-	overflow												:	boolean;
+	vt,secunda												:	TVolltext;
+	worte														:	TStringList;
+	such,von,bis,fFilter,bFilter,inFile,datum,dbn:	string;
+	vlBuf														:	array[0..255] of byte;
+	a															:	array[0..9] of string;
+	id,info													:	cardinal;
+	i,n,vlCount,maxTreffer,sortOrder					:	integer;
+	cmd														:	string[3];
+	overflow													:	boolean;
 
 begin
 	try
@@ -199,21 +196,21 @@ begin
 				result:='Too few parameters in "'+msg+'"'; EXIT
 			end;
 
-			if FindDB(ExtractFileName(a[1]),i) then
+			dbn:=FindDB(ExtractFileName(a[1]),i);
+			if dbn<>'' then
 				vt:=dbList.objects[i] as TVolltext
-			else 
-			begin
+			else begin
 				if cmd='o' then begin			//	'o'pen ist dann erstes open (db bei Programmstart nicht geöffnet)
 					vt:=NIL; 
 					dbList.AddObject(a[1],vt);	// Datenbank wird dann unten geöffnet
-					FindDB(ExtractFileName(a[1]),i)
+					FindDB(ExtractFileName(a[1]),i);
 				end else	begin
 					result:='Database "'+a[1]+'" is unknown here';
 					EXIT;
 				end;
 			end;
 		end else if (n>=1) then begin			// 'v'erbose für eine bestimmte db
-			result:=status[FindDB(ExtractFileName(a[1]),i)];
+			result:=status[FindDB(ExtractFileName(a[1]),i)<>''];
 			EXIT;
 		end;
 
@@ -279,7 +276,7 @@ begin
 				worte.Sorted:=false; worte.Duplicates:=dupAccept;
 				worte.SetText(@a[2][1]);
 				n:=vt.InsertWords(worte,inFile,datum,'',info,id);
-				if n>0 then
+				if n>=0 then
 					result:=IntToStr(id)
 				else
 					result:='Inserting failed with ErrorCode #'+IntToStr(n);
@@ -303,7 +300,7 @@ begin
 	  	end else if (cmd='m') then begin		// only for MEMORY (tempory) databases!
 			if ro then 
 				result:='DB is opened readOnly: ABORTED'
-		  	else if FindDB(ExtractFileName(a[2]),i) then  begin
+		  	else if FindDB(ExtractFileName(a[2]),i)<>'' then  begin
 			  	secunda:=dbList.objects[i] as TVolltext;
 			  	n:=vt.ExecMerge(secunda,'',false,false,a[3]='kill',false);
 			  	if n<>0 then result:=IntToStr(n) else result:=status[true];
@@ -317,7 +314,7 @@ begin
 			if vt=NIL then	begin
 				dbList.objects[i]:=LoadDB(a[1]);
 			 	if dbList.objects[i]=NIL then 
-					result:='Cannot open Database"'+a[1]+'"'
+					result:='Cannot open Database "'+dbn+'"'
 			 	else
 					result:=status[true]
 		 	end else begin
@@ -348,6 +345,7 @@ begin
 		DateSeparator:='.'; ShortDateFormat:='dd.mm.yyyy'; 
 		joda:=TJodaDaemon.Create;
 		if (joda.Error=0) and not joda.Run(true) then log.Add('jodad PANIC: too many childs or socket closed',true);
+		log.Add('Jodad stopped: '+IntToStr(joda.Error),true);
 		joda.Free;
 		log.Free;
 	end;

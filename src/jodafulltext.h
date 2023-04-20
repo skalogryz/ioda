@@ -5,7 +5,7 @@
  * an C header for libjodafulltext by Oliver Graf, Kevag Telekom GmbH
  */
  
- (* Copyright (C) 1994-2004  ograf@rz-online.net & jo@magnus.de
+/*  Copyright (C) 1994-2004  ograf@rz-online.net & jo@magnus.de
    This library is free software; you can redistribute it and/or modify it 
 	under the terms of the GNU Lesser General Public License as published by
 	the Free Software Foundation; either version 2.1 of the License, or 
@@ -19,7 +19,7 @@
    You should have received a copy of the GNU Lesser General Public License 
 	along with this library; if not, write to the Free Software Foundation, 
 	Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA 
-*)
+*/
 
 /*
  * Sort Order.
@@ -30,6 +30,17 @@ typedef enum {
 } jodaSortOrder;
 
 typedef int jodaHandle;
+
+typedef struct {
+  int id;
+  int date;
+  int weight;
+  int info;
+  int dup;
+  char *fileref;
+  char *title;
+  char *__sort;
+} jodaHit;
 
 /*
  * Database functions
@@ -53,9 +64,23 @@ int jodaClose ( jodaHandle handle );
 
 
 /*
- * int jodaSortIssues( handle, s)
-*/
+ * void jodaSortIssues( handle, s) DEPRECATED!
+ *
+ * s is the sort spec: PATTERN[,PREFERRED]
+ * PATTERN is applied to filenames to find the sort key
+ * first PREFERRED containing name is moved to top
+ * BOTH are REGEXes!
+ *
+ */
 void jodaSortIssues( jodaHandle handle, char *issueParams);
+/*
+ * NEW Versions:
+ *  jodaSortIssuesPP: set as seperate strings
+ *  jodaSortIssuesOLP: use offset,length instead of regex for pattern
+ *
+ */
+int jodaSortIssuesPP( jodaHandle handle, char *issuePattern, char *issuePreferred);
+int jodaSortIssuesOLP( jodaHandle handle, int offset, int length, char *issuePreferred);
 
 /*
  * int jodaSearch ( handle, query, dstart, dend, fileFilter, maxHits,
@@ -77,23 +102,45 @@ int jodaVLSearch ( jodaHandle handle, char *query, char *dstart, char *dend,
 /*
  * int jodaGetOneHit ( handle, hit, maxlen, buffer)
  */
-int jodaGetOneHit ( int handle, int hit, int maxlen, char *buffer);
+int jodaGetOneHit ( jodaHandle handle, int hit, int maxlen, char *buffer);
 
 /*
  * int jodaGetAllHits ( handle, hits, maxlen, buffer)
  */
-int jodaGetAllHits ( int handle, int hits, int maxlen, char *buffer);
+int jodaGetAllHits ( jodaHandle handle, int hits, int maxlen, char *buffer);
 
 /*
- * int jodaStore ( handle, words, fileName, date, info, id )
+ * char *jodaGetQuery ( handle )
+ *
+ * retruns the parsed query of the last search
  */
-int jodaStore ( int handle, char *words, char *fileName, char *date,
+char *jodaGetQuery( jodaHandle handle );
+
+/*
+ * jodaHit **jodaGetHits ( handle )
+ */
+jodaHit *jodaGetHit ( jodaHandle handle, int hit );
+
+/*
+ * jodaHit **jodaGetHits ( handle )
+ */
+jodaHit **jodaGetHits ( jodaHandle handle, int *hits );
+
+/*
+ * int jodaStore ( handle, words, fileName, date, info, &id )
+ */
+int jodaStore ( jodaHandle handle, char *words, char *fileName, char *date,
 				int info, int *id);
 
 /*
  * int jodaInvalidateEntry ( handle, words, id )
  */
-int jodaInvalidateEntry ( int handle, char *words, int id);
+int jodaInvalidateEntry ( jodaHandle handle, char *words, int id);
+
+/*
+ * int jodaChainDuplicate ( handle, fileName, lastid, &id )
+ */
+int jodaChainDuplicate ( jodaHandle handle, char *fileName, int lastID, int *id);
 
 /*
  * end of jodafulltext.h

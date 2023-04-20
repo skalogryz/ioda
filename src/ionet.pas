@@ -1,4 +1,4 @@
-Unit ioNet2;
+Unit IONet;
 {$H+}{$I-}
 
 // Objekt-Verpackung um Signalhandler und einfache TCP-Streaming-Sockets
@@ -344,7 +344,7 @@ end;
 
 procedure TInetServer.SendFixMessage(socket:longint; const s:string);
 type
-	TBuf		=	array[0..$7FFFFFFF] of char;
+	TBuf		=	array[0..$7FFFF] of char;
 	PBuf		=	^TBuf;
 var
 	buffer	:	PBuf;
@@ -492,7 +492,8 @@ begin
 				CONTINUE;
 			end else
 			begin
-				writeln('Socket Communication is broken: SocketError=#',socketError); EXIT;
+				appError:=res; EXIT;
+//				writeln('Socket Communication is broken: SocketError=#',socketError); 
 			end;
 		end;
 		

@@ -15,7 +15,7 @@ unit Unicode;
 }
 
 INTERFACE
-uses Strings,SysUtils;
+uses SysUtils;
 type
 
   UCChar 			= LongWord;					 // Unicode char type (32 bit)

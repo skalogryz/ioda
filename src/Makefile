@@ -1,15 +1,20 @@
+ifdef VERBOSE
+PPC=/usr/bin/ppc386 -vewnih
+else
 PPC=/usr/bin/ppc386
+endif
 TAR=/bin/tar
 RM=/bin/rm -f
 INSTALL=/usr/bin/install
 
-TARGETS=joda jodacgi jodad checkdb libjodafulltext.so
+TARGETS=joda jodad libjodafulltext.so checkdb checkbtree convert05 jodacgi
 
-JODAUNITS=bayerbaum.ppu sbayerbaum.ppu \
-	idlist.ppu occtable3.ppu filerefs.ppu \
-	syntaxparser.ppu \
+JODAUNITS=regexpr.ppu md5.ppu unicode.ppu jstreams.ppu jstrings.ppu \
+	btreeflex.ppu idlist.ppu occtable.ppu filerefs.ppu \
+	syntaxparser.ppu globs.ppu \
 	dirscanner.ppu logbook.ppu configreader.ppu \
-	volltext2.ppu ionet2.ppu regexpro.ppu
+	ionet.ppu hitlist.ppu \
+	volltext.ppu
 
 prefix=$(DESTDIR)/usr
 bindir=$(prefix)/bin
@@ -20,6 +25,10 @@ all: $(TARGETS)
 
 %.ppu: %.pas
 	$(PPC) $<
+
+# special handling for the delphi based TRegExpr class
+regexpr.ppu: regexpr.pas
+	$(PPC) -Sd $<
 
 joda: $(JODAUNITS) joda.pas
 	$(PPC) joda.pas
@@ -33,6 +42,12 @@ jodad: $(JODAUNITS) jodad.pas
 checkdb: $(JODAUNITS) checkdb.pas
 	$(PPC) checkdb.pas
 
+checkbtree: $(JODAUNITS) checkbtree.pas
+	$(PPC) checkbtree.pas
+
+convert05: $(JODAUNITS) convert05.pas
+	$(PPC) convert05.pas
+
 libjodafulltext.so: $(JODAUNITS) jodafulltext.pas
 	$(PPC) jodafulltext.pas
 
@@ -43,7 +58,7 @@ install: $(TARGETS)
 	$(INSTALL) -d $(bindir)
 	$(INSTALL) -d $(libdir)
 	$(INSTALL) -d $(includedir)
-	$(INSTALL) -m 755 joda jodacgi jodad $(bindir)
+	$(INSTALL) -m 755 joda jodad $(bindir)
 	$(INSTALL) -m 644 libjodafulltext.so $(libdir)
 	$(INSTALL) -m 644 jodafulltext.h     $(includedir)
 

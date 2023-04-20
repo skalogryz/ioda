@@ -16,7 +16,7 @@ program CheckDB;
 *)
 
 uses
-   Classes,SysUtils,BayerBaum,SBayerBaum,occtable3;
+   Classes,SysUtils,BTreeFlex,OccTable;
 
 type
 	TPrg	=	class
@@ -79,7 +79,10 @@ begin
 	inc(words);
 	allwords+=akt.z;
 	n:=occ.GetItemCount(akt.dp);
-	if n<0 then begin writeln('FEHLER ',n,' bei "',akt.s,'": BTree=',akt.z); end;
+	if n<0 then begin 
+		writeln('FEHLER ',n,' bei "',akt.s,'": BTree=',akt.z,' DP=',akt.dp:12); 
+		EXIT;
+	end;
 	occWords+=cardinal(n);
 	if cardinal(n)<>akt.z then writeln('Abweichung bei "',akt.s,'": BTree=',akt.z,' OccList=',n);
 end;

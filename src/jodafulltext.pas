@@ -18,11 +18,11 @@ library jodafulltext;
 
 {$H+}
 
-uses CMEM, Classes, Strings, SysUtils, Volltext2, ConfigReader;
+uses CMEM,Classes,SysUtils,Volltext,HitList;
 
 const
 	VTMAXDBS = 32;
-	version	= '3.2';
+	version	= '3.3';
 			 
 type			
 	EConfigError = class(Exception);
@@ -84,10 +84,39 @@ begin
 end; { jodaClose }
 
 
+{ Deprecated! }
 procedure jodaSortIssues(handle:integer; const issueParams:PChar); cdecl; export;
 begin
 	if ((handle>0) and (handle<=VTMAXDBS) and (vtdbs[handle]<>NIL)) then 
-		vtdbs[handle].SortIssues:=StrPas(issueParams);
+		vtdbs[handle].SetSortedResults(StrPas(issueParams));
+end;
+
+
+function jodaSortIssuesPP(handle:integer; const issuePattern, issuePreferred:PChar): integer; cdecl; export;
+begin
+	result:=-1;
+	if (handle>0) and (handle<=VTMAXDBS) then begin
+		if vtdbs[handle]=nil then
+			result:=-2
+		else begin
+			vtdbs[handle].SetSortedResults(StrPas(issuePattern), StrPas(issuePreferred));
+			result:=0;
+		end;
+	end;
+end;
+
+
+function jodaSortIssuesOLP(handle: integer; const offset, length: integer; issuePreferred:PChar): integer; cdecl; export;
+begin
+	result:=-1;
+	if (handle>0) and (handle<=VTMAXDBS) then begin
+		if vtdbs[handle]=nil then
+			result:=-2
+		else begin
+			vtdbs[handle].SetSortedResults(offset, length, StrPas(issuePreferred));
+			result:=0;
+		end;
+	end;
 end;
 
 
@@ -191,6 +220,34 @@ begin
 end; { jodaGetAllHits }
 
 
+function jodaGetQuery(handle : integer): PChar; cdecl; export;
+begin
+	if ((handle>0) and (handle<=VTMAXDBS) and (vtdbs[handle]<>NIL)) then 
+		result:=PChar(vtdbs[handle].query)
+	else
+		result:=nil;
+end;
+
+function jodaGetHit(handle : integer; i: integer): PHit; cdecl; export;
+begin
+	if ((handle>0) and (handle<=VTMAXDBS) and (vtdbs[handle]<>NIL)) then 
+		result:=vtdbs[handle].HitPtr[i]
+	else
+		result:=nil;
+end;
+
+
+function jodaGetHits(handle	: integer; var i:integer): PHitArray; cdecl; export;
+begin
+	if ((handle>0) and (handle<=VTMAXDBS) and (vtdbs[handle]<>NIL)) then begin
+		result:=vtdbs[handle].HitArrayPtr;
+		i:=vtdbs[handle].HitCount;
+	end else begin
+		result:=nil;
+		i:=0;
+	end;
+end;
+
 
 function jodaStore(handle : integer;
 					    words, fileName, date : PChar;
@@ -242,8 +299,21 @@ begin
 end;
 
 
+function jodaChainDuplicate(handle : integer; fname: PChar; lastID:cardinal; var id: cardinal): integer; cdecl; export;
+begin
+	result:=0;
+	if (handle>0) and (handle<=VTMAXDBS) then begin
+		if vtdbs[handle]=nil then
+			result:=-2
+		else begin
+			result:=vtdbs[handle].ChainDuplicate(StrPas(fname),lastID,id);
+		end;
+	end;
+end;
+
+
 exports	
-	jodaOpen, jodaClose, jodaSearch, jodaVLSearch, jodaGetOneHit, jodaStore, jodaInvalidateEntry;
+	jodaOpen, jodaClose, jodaSortIssues, jodaSortIssuesPP, jodaSortIssuesOLP, jodaSearch, jodaVLSearch, jodaGetQuery, jodaGetHit, jodaGetHits, jodaGetOneHit, jodaStore, jodaInvalidateEntry, jodaChainDuplicate;
 
 
 begin
