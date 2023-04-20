@@ -197,9 +197,10 @@ begin
 			end;
 
 			dbn:=FindDB(ExtractFileName(a[1]),i);
-			if dbn<>'' then
-				vt:=dbList.objects[i] as TVolltext
-			else begin
+			if dbn<>'' then begin
+				vt:=dbList.objects[i] as TVolltext;
+				a[1]:=dbn;
+			end else begin
 				if cmd='o' then begin			//	'o'pen ist dann erstes open (db bei Programmstart nicht geöffnet)
 					vt:=NIL; 
 					dbList.AddObject(a[1],vt);	// Datenbank wird dann unten geöffnet
@@ -277,7 +278,7 @@ begin
 				worte.SetText(@a[2][1]);
 				n:=vt.InsertWords(worte,inFile,datum,'',info,id);
 				if n>=0 then
-					result:=IntToStr(id)
+					result:=IntToStr(n)
 				else
 					result:='Inserting failed with ErrorCode #'+IntToStr(n);
 				worte.Free;
@@ -294,7 +295,7 @@ begin
 			  	worte.Sorted:=false; worte.Duplicates:=dupAccept;
 			  	worte.SetText(@a[2][1]);
 			  	n:=vt.InvalidateEntry(worte,id);
-			  	if n<>0 then result:='Invalidating Entry failed with ErrorCode #'+IntToStr(n) else result:=IntToStr(n);
+			  	if n<0 then result:='Invalidating Entry failed with ErrorCode #'+IntToStr(n) else result:=IntToStr(n);
 			  	worte.Free;
 		  end;
 	  	end else if (cmd='m') then begin		// only for MEMORY (tempory) databases!

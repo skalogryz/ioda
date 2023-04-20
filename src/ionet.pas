@@ -27,8 +27,8 @@ uses
 	SysUtils,UnixUtil,BaseUnix,Unix,Sockets,idList,JStrings;
 
 type
-	TSigHandleProc	=	procedure(sig:longint); CDECL;
-	
+//	TSigHandleProc	=	procedure(sig:longint); CDECL;
+	TSigHandleProc	= SigActionHandler;
 	TSigHandler	=	class
 							constructor Create(sigNum:integer; sigHandleProc:TSigHandleProc);
 							destructor  Destroy; OVERRIDE;
@@ -122,7 +122,7 @@ const
 	sockOpt				:	integer	=	1;
 
 
-procedure ChildHandler(sig:longint); CDECL;
+procedure ChildHandler(sig:longint; info: psiginfo; context:PSigContext); CDECL;
 var
 	i,j,pid	:	integer;
 begin
@@ -140,7 +140,7 @@ begin
 end;
 
 
-procedure TermHandler(sig:longint); CDECL;
+procedure TermHandler(sig:longint; info: psiginfo; context:PSigContext); CDECL;
 begin
 	terminated:=true;
 	writeln('Signal #'+IntToStr(sig)+' received - terminating program.');	
@@ -383,6 +383,7 @@ begin
 		res:=-710; inetError:=socketError; EXIT
 	end;
 	
+	a[0]:=''; a[1]:=''; a[2]:=''; a[3]:='';		// eigentlich nicht notwenig, doch derzeit Compilerwarnung
 	n:=split(toAddr,':',a);
 	if n<1 then
 	begin

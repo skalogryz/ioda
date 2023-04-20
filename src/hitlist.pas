@@ -111,7 +111,7 @@ begin
 	hitarr[count].fileref := '';
 	hitarr[count].title   := '';
 	hitarr[count].sort    := '';
-	count+=1
+	cnt+=1
 end;
 
 procedure THitList.AddWithFileRef(fileref, title: string; id, date, weight, info: cardinal);
@@ -128,7 +128,7 @@ begin
 	hitarr[count].fileref := fileref;
 	hitarr[count].title   := title;
 	hitarr[count].sort    := '';
-	count+=1
+	cnt+=1
 end;
 
 procedure THitList.AddDuplicates(dups: TDupSortList);
@@ -146,7 +146,7 @@ begin
 		hitarr[count].fileref := dups[i].fileref;
 		hitarr[count].title   := dups[i].title;
 		hitarr[count].sort    := dups[i].sort;
-		count+=1
+		cnt+=1
 	end;
 end;
 

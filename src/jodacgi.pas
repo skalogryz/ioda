@@ -61,11 +61,14 @@ begin
 		serverName:=cgi.Values['serverName'];
 			
 		res:=0;
-		if FileExists(dbPath+db+'.LOCK') then 
-			raise EConfigError.Create('Datenbank "'+db+'" ist momentan geschlossen (Update läuft)');
-
-		vt:=TVolltext.Create(dbpath+db,ReadOnlyDB,res);
+		vt:=TVolltext.Create(dbpath+db,ReadOnlyDBNoCache,res);
 		if res<>0 then raise EConfigError.Create('Fehler beim Öffnen der Datenbank "'+dbPath+db+'" - Code='+IntToStr(res));
+
+		if FileExists(vt.DatabaseName+'.LOCK') then 
+		begin
+			writeln('Datenbank "'+vt.DatabaseName+'" ist locked (update in progress?)');
+			raise EConfigError.Create('Datenbank "'+vt.DatabaseName+'" ist momentan geschlossen (Update aktiv)<br>Bitte versuchen Sie es zu einem späteren Zeitpunkt.');
+		end;
 //		vt.SortIssues:='/[A-Z]+/,'+cgi.Values['prefi'];
 		res:=vt.Suche(such,von,bis,fFilter,maxTreffer,sortOrder,info,overflow);
 		err:=vt.Error;

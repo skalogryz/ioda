@@ -61,7 +61,7 @@ const
 	day95		 	 		 = 34700; // Differenz-Tage zwischen 1900 (TDateTime=0) und 1995 (occTable.date=0)
 
 type
-	TDbMode		=	(ReadWriteDB,ReadOnlyDB,undefinedOpenMode);
+	TDbMode		=	(ReadWriteDB=0,ReadOnlyDB=1,ReadOnlyDBNoCache=2,undefinedOpenMode=255);
 
 // Klassenfunktionen:
 	TThirdLevelCheck=function (id,datum,gewicht,info:cardinal):boolean of object;
@@ -97,7 +97,7 @@ type
 									// Insert-Schnittstelle zu bel. Programmen, Datei (txt, html u.a.) wird über cfg['execProg'] geparst und indiziert
 									// datum darf leer sein, dann wird das Tagesdatum eingesetzt
 
-						function InsertWordsFromFiles(path,pattern,datum:string; doubletten:integer):integer; 
+						function InsertWordsFromFiles(path,pattern,datum:string):integer; 
 									// Insert-Schnittstelle zu bel. Programmen, wie vor, jedoch für ganze Verzeichnisbäume
 									// kann Doubletten über MD5 erkennen und verketten (1) oder ignorieren (2)
 									// datum darf leer sein, dann wird das Dateidatum eingesetzt
@@ -129,7 +129,7 @@ type
 						function	InvalidateEntry(worte:TStringList; id:cardinal):integer;
 									// Lösch-Schnittstelle für Pascal-Programme
 									// Ein Eintrag, ggf. mitsamt allen Doubletten, wird als ungültig markiert:
-									// Occtable: Eintrag wird mit $(FF)FFFFFF markiert und kann recycled werden
+									// Occtable: Eintrag wird gelöscht, Platz kann wiederverwendet werden
 									// FileRef:  Eintrag wird geleert, Speicherplatz bleibt belegt (=> MergeDB verwenden)
 									
 						function InvalidateEntryFromFile(const wordListFile:string; id:cardinal):integer;
@@ -151,6 +151,7 @@ type
 						//
 						procedure   SetSortedResults(const pattern, preferred: string);
 						procedure   SetSortedResults(const offset, length: integer; preferred: string);
+						procedure   SetLockFile(createFile:boolean);		// creates (true) or erases a lockFile (.LOCK)
 
 						PROTECTED
 						treffer			:	THitList;
@@ -169,20 +170,24 @@ type
 						issueLength		:	integer;
 						issuePattern,
 						issuePreferred,
+						dbCfg,
 						dbName,
 						basePathName,
 						fFilter,
 						tmpFile,
 						execProg			: 	string;
 						vlbFilterNum,
-						rres				:	integer;
+						rres,
+						doubletten		:	integer;
 						vlbFilter		:	PByte;
 						maxFind,
 						currentDiff,
 						btreeCapacity,
 						btreeGrowSize,
 						occCapacity,
-						occGrowSize		:	longint;
+						occGrowSize,
+						refCapacity,
+						refGrowSize		:	longint;
 						globalInfoBits	:	cardinal;
 						dStart,
 						dSTop				:	word;
@@ -192,8 +197,8 @@ type
 						opeNed,
 						useBigOccList_,
 						occSize,
-						useMemBtree_,
-						usefileRef_ 	:	integer;
+						useMemBtree,
+						useFileRef 	:	integer;
 						mapFactor		:	real;
 						ro,
 						recycling,
@@ -201,7 +206,10 @@ type
 						useLog,
 						useWordFilter,
 						followLinks,
-						caseSensitive	:	boolean;
+						caseSensitive,
+						tempDB,
+						clonedDB,
+						dbLocked			:	boolean;
 						currentOp		:	TOp;
 
 						function    GetSortedResultMode:string;
@@ -239,6 +247,7 @@ type
 						property		MaxNumsPerWord : integer read maxNums write maxNums;
 						property		BasePath	   : string read basePathName write basePathName;
 						property    DatabaseName: string read dbName;
+						property    DatabaseConfigName: string read dbCfg;
 					end;						   
 
 
@@ -255,41 +264,70 @@ const
 constructor TVolltext.Create(const db:string; mode:TDbMode; var res:integer);
 var
 	cfg		:	TConfigReader;
+	st			:	TSystemTime;
+	p			:	integer;
 begin
 	inherited Create;
+	tempDB:=false; dbLocked:=false;
 	cfg:=TConfigReader.Create;
-	res:=cfg.ReadConfigFile(db);
-	if res=0 then begin  
-		writeln('Cannot open ConfigFile '+db);	
+	p:=pos(':',db);
+	if p>0 then begin
+		dbCfg:=copy(db,1,p-1);
+		if length(db)>p then
+			dbName:=ExtractFilePath(dbCfg)+copy(db,p+1,255)
+		else begin
+			DateTimeToSystemTime(now,st);
+			with st do dbName:=dbCfg+Format('_%0.2d%0.2d%0.2d%0.2d%0.2d%0.2d%0.3d',[year-2000,month,day,hour,minute,second,millisecond]);
+			tempDB:=true;
+		end;
+		clonedDB:=true;
+	end else begin
+		dbName:=db;
+		dbCfg:=db;
+		clonedDB:=false;
+	end;
+	
+	res:=cfg.ReadConfigFile(dbCfg);
+	if res<=0 then begin  
+		writeln('Cannot open ConfigFile '+dbCfg);	
 		res:=600; cfg.Free; EXIT;
 	end;
-	if mode=undefinedOpenMode then mode:=TDBMode(cfg.Int['openMode']);
 
+	if mode=undefinedOpenMode then mode:=TDBMode(cfg.Int['openMode']);
 	useLog 			:= res<>0;				// Flag für "Logbuch-Eintrag"
 	res				:= 0;
-	dbName			:= db;
 	vtError  		:= 0;
 	ro					:=	mode<>ReadWriteDB; 
 	maxNums			:=	defaultMaxNums;
 	mapMode  		:= cfg.Int['occMapMode'];
 	mapFactor		:= 0.5;					// Default: 50% der bisherigen Vorkommen eines Wortes reservieren
-	useMemBtree_	:= cfg.Int['useMemBtree'];
+	useMemBtree	:= cfg.Int['useMemBtree'];
 	btreeCapacity	:= cfg.Int['btreeCapacity'];
 	btreeGrowSize	:= cfg.Int['btreeGrowSize'];
 	useBigOccList_	:= cfg.Int['useBigOccList']; occSize:=abs(useBigOccList_);
 	occCapacity		:= cfg.Int['occCapacity'];
 	occGrowSize		:= cfg.Int['occGrowSize'];
-	usefileRef_		:= cfg.Int['useFileref'];
+	useFileRef		:= cfg.Int['useFileref'];
+	refCapacity		:= cfg.Int['refCapacity'];
+	refGrowSize		:= cfg.Int['refGrowSize'];
 	recycling		:= cfg.Int['enableRecycling']=1;
 	followLinks		:=	cfg.Int['followLinks']=1;
 	caseSensitive	:=	cfg.Int['caseSensitive']=1;
 	globalInfoBits := cardinal(not cfg.Int['localInfoBits']); // Default ist $FFFFFFFF (alle InfoBits wirken Synonym-global)
+	doubletten		:= cfg.Int['doubletten'];
 	opeNed			:=	0;
 	
+	if mode=ReadOnlyDBNoCache then begin
+		mode:=ReadOnlyDB;						//  nur vorsichtshalber 
+		useMemBtree:=0;
+		useBigOccList_:=occSize;
+		if useFileRef>0 then useFileRef:=1;
+	end;
+
 	fileRef:=NIL; occ:=NIL; btree:=NIL; treffer:=NIL; tmpdup:=NIL; fileList:=NIL;
-	unworte:=NIL; 	log:=NIL; reg:=NIL; utf8Decoder:=NIL; rres:=0; 
+	unworte:=NIL; log:=NIL; reg:=NIL; utf8Decoder:=NIL; rres:=0; 
 	DateSeparator:='.'; ShortDateFormat:='dd.mm.yyyy'; 
-	log:=TLogbook.Create(db+'.log',10000,res);
+	log:=TLogbook.Create(dbCfg+'.log',10000,res);
 
 	if res<>0 then begin  
 		res:=613; EXIT;
@@ -303,11 +341,11 @@ begin
 
 	unworte:=TStringlist.Create;
 	unworte.Sorted:=true; unworte.Duplicates:=dupIgnore;
-	if FileExists(db+'.unworte.txt') then unworte.LoadFromFile(db+'.unworte.txt');
+	if FileExists(dbCfg+'.unworte.txt') then unworte.LoadFromFile(dbCfg+'.unworte.txt');
 
 	issuePattern:=''; issuePreferred:='';
 	issueOffset:=0; issueLength:=0;
-	if useFileRef_>0 then
+	if useFileRef>0 then
 		ThirdLevelCheck:=@ThirdLevelCheck_WithFileRef
 	else
 		ThirdLevelCheck:=@ThirdLevelCheck_WithoutFileRef;
@@ -336,8 +374,15 @@ begin
 	treffer.Free;
 	tmpdup.Free;
 	unworte.Free;
-	if useLog then log.Add('Database is now closed. Thank you for using joda!',true);
+	if tempDB then begin
+		DeleteFile(dbName+'.btf');
+		DeleteFile(dbName+'.ocl');
+		if useFileRef>0 then DeleteFile(dbName+'.ref');
+		if useLog then log.Add('Temporary Database was deleted. Thank you for using joda!',true);		
+	end else
+		if useLog then log.Add('Database is now closed. Thank you for using joda!',true);
 	log.Free;
+	if dbLocked then SetLockFile(false);
 	inherited Destroy;
 end;
 
@@ -349,22 +394,23 @@ begin
 	btree.Free;
 	inc(opeNed);
 	try
-		if useMemBtree_<>0 then
+		if useMemBtree<>0 then
 			btree:=TMemBaybaum.Create(dbName,btreeCapacity,btreeGrowSize,ro,result)
 		else
 			btree:=TFileBaybaum.Create(dbName,ro,result);
 		if result=0 then begin  
 			occ:=TClusterMaster.Open(dbName,useBigOccList_,occCapacity,occGrowSize,ro,recycling,result);
-			if (result=0) and (usefileRef_>0) then begin  
-				if usefileRef_=2 then
-					fileRef:=TMemfileRef.Create(dbName,ro,result)
+			if (result=0) and (useFileRef>0) then begin  
+				if useFileRef=2 then
+					fileRef:=TMemFileRef.Create(dbName,refCapacity,refGrowSize,ro,result)
 				else
-					fileRef:=TDynamicfileRef.Create(dbName,ro,result);
+					fileRef:=TDynamicFileRef.Create(dbName,ro,result);
 			end;
 		end;
 	except
 		on E:Exception do result:=-616
 	end;
+	
 	if result=0 then begin  
 		if useLog then log.Add('*** Database is now open ('+IntToStr(opeNed)+'. time) ***',true)
 	end else
@@ -372,12 +418,10 @@ begin
 end;
 
 
-procedure TVolltext.Clear;						// nur für REINE Memory-DB!
+procedure TVolltext.Clear;
 begin
-	if (useMemBtree_<>0) and (useBigOccList_<0)  and (useFileRef_<>1) then begin  
-		btree.Clear; occ.Clear;
-		if useFileRef_=2 then fileRef.Clear; 
-	end;
+	btree.Clear; occ.Clear;
+	if useFileRef>0 then fileRef.Clear; 
 end;
 
 
@@ -386,7 +430,7 @@ var
 	a : array[0..1] of string;
 	n : integer;
 begin
-	if useFileRef_=0 then EXIT;
+	if useFileRef=0 then EXIT;
 	issuePattern:='';
 	issuePreferred:='';
 	issueOffset:=0;
@@ -403,7 +447,7 @@ end;
 
 procedure TVolltext.SetSortedResults(const pattern, preferred: string);
 begin
-	if useFileRef_=0 then EXIT;
+	if useFileRef=0 then EXIT;
 	issuePattern:= '';
 	issuePreferred:='';
 	issueOffset:=0;
@@ -419,7 +463,7 @@ end;
 
 procedure TVolltext.SetSortedResults(const offset, length: integer; preferred: string);
 begin
-	if useFileRef_=0 then EXIT;
+	if useFileRef=0 then EXIT;
 	issuePattern:= '';
 	issuePreferred:='';
 	issueOffset:=0;
@@ -456,6 +500,8 @@ begin
 		result:=trunc(Date)-day95-1
 	else if (datum='TOMORROW') then
 		result:=trunc(Date)-day95+1
+	else if (copy(datum,1,1)='I') then
+		result:=StrToIntDef(copy(datum,2,length(datum)-1),-1)
 	else
 		try
 			d:=StrToDate(datum);
@@ -520,57 +566,66 @@ var
 begin
 	fop    := vlbFilter;
 	fval   := vlbFilter + 1;
-	result := (fop^ AND $c0) <> 0;
-
+	result := (fop^ AND $80) <> 0;
 	for i := 1 to vlbFilterNum do begin
 		vbyte := fval^;
 		case (fop^ AND $3F) of
+		  //
 		  // Old Style VL Search OPs
-		  1	 : res := vbyte = (info AND $000000FF);
-		  2	 : res := (vbyte AND ((info AND $0000FF00) shr 8)) <> 0;
-		  3	 : res := ((info AND $00FF0000) shr 16) <= vbyte;
-		  4	 : res := ((info AND $00FF0000) shr 16) >= vbyte;
+		  // DEPRECATED AND NO LONGER SUPPORTED
+		  //
 		  // New Style VL Search Combinations
+		  //
 		  // info = val
-		  5	 : res := (info AND $000000FF)          = vbyte;
-		  6	 : res := ((info AND $0000FF00) shr 8)  = vbyte;
-		  7	 : res := ((info AND $00FF0000) shr 16) = vbyte;
+		  4	 : res :=  (info AND $000000FF)         = vbyte;
+		  5	 : res := ((info AND $0000FF00) shr 8)  = vbyte;
+		  6	 : res := ((info AND $00FF0000) shr 16) = vbyte;
+		  7	 : res := ((info AND $FF000000) shr 24) = vbyte;
 		  // info < val
-		  9	 : res := (info AND $000000FF)          < vbyte;
-		  10 : res := ((info AND $0000FF00) shr 8)  < vbyte;
-		  11 : res := ((info AND $00FF0000) shr 16) < vbyte;
+		  8	 : res :=  (info AND $000000FF)         < vbyte;
+		  9	 : res := ((info AND $0000FF00) shr 8)  < vbyte;
+		  10 : res := ((info AND $00FF0000) shr 16) < vbyte;
+		  11 : res := ((info AND $FF000000) shr 24) < vbyte;
 		  // info > val
-		  13 : res := (info AND $000000FF)          > vbyte;
-		  14 : res := ((info AND $0000FF00) shr 8)  > vbyte;
-		  15 : res := ((info AND $00FF0000) shr 16) > vbyte;
+		  12 : res :=  (info AND $000000FF)         > vbyte;
+		  13 : res := ((info AND $0000FF00) shr 8)  > vbyte;
+		  14 : res := ((info AND $00FF0000) shr 16) > vbyte;
+		  15 : res := ((info AND $FF000000) shr 24) > vbyte;
 		  // (info & val) = val (all val bits set)
-		  17 : res := ((info AND $000000FF)          AND vbyte) = vbyte;
-		  18 : res := (((info AND $0000FF00) shr 8)  AND vbyte) = vbyte;
-		  19 : res := (((info AND $00FF0000) shr 16) AND vbyte) = vbyte;
+		  16 : res :=  ((info AND $000000FF)         AND vbyte) = vbyte;
+		  17 : res := (((info AND $0000FF00) shr 8)  AND vbyte) = vbyte;
+		  18 : res := (((info AND $00FF0000) shr 16) AND vbyte) = vbyte;
+		  19 : res := (((info AND $FF000000) shr 24) AND vbyte) = vbyte;
 		  // (info & val) <> 0 (one val bit set)
-		  21 : res := ((info AND $000000FF)          AND vbyte) <> 0;
-		  22 : res := (((info AND $0000FF00) shr 8)  AND vbyte) <> 0;
-		  23 : res := (((info AND $00FF0000) shr 16) AND vbyte) <> 0;
+		  20 : res :=  ((info AND $000000FF)         AND vbyte) <> 0;
+		  21 : res := (((info AND $0000FF00) shr 8)  AND vbyte) <> 0;
+		  22 : res := (((info AND $00FF0000) shr 16) AND vbyte) <> 0;
+		  23 : res := (((info AND $FF000000) shr 24) AND vbyte) <> 0;
 		  // info <> val
-		  37 : res := (info AND $000000FF)          <> vbyte;
-		  38 : res := ((info AND $0000FF00) shr 8)  <> vbyte;
-		  39 : res := ((info AND $00FF0000) shr 16) <> vbyte;
+		  36 : res :=  (info AND $000000FF)         <> vbyte;
+		  37 : res := ((info AND $0000FF00) shr 8)  <> vbyte;
+		  38 : res := ((info AND $00FF0000) shr 16) <> vbyte;
+		  39 : res := ((info AND $FF000000) shr 24) <> vbyte;
 		  // info >= val
-		  41 : res := (info AND $000000FF)          >= vbyte;
-		  42 : res := ((info AND $0000FF00) shr 8)  >= vbyte;
-		  43 : res := ((info AND $00FF0000) shr 16) >= vbyte;
+		  40 : res :=  (info AND $000000FF)         >= vbyte;
+		  41 : res := ((info AND $0000FF00) shr 8)  >= vbyte;
+		  42 : res := ((info AND $00FF0000) shr 16) >= vbyte;
+		  43 : res := ((info AND $FF000000) shr 24) >= vbyte;
 		  // info <= val
-		  45 : res := (info AND $000000FF)          <= vbyte;
-		  46 : res := ((info AND $0000FF00) shr 8)  <= vbyte;
-		  47 : res := ((info AND $00FF0000) shr 16) <= vbyte;
+		  44 : res :=  (info AND $000000FF)         <= vbyte;
+		  45 : res := ((info AND $0000FF00) shr 8)  <= vbyte;
+		  46 : res := ((info AND $00FF0000) shr 16) <= vbyte;
+		  47 : res := ((info AND $FF000000) shr 24) <= vbyte;
 		  // (info & val) <> val (one val bit not set)
-		  49 : res := ((info AND $000000FF)          AND vbyte) <> vbyte;
-		  50 : res := (((info AND $0000FF00) shr 8)  AND vbyte) <> vbyte;
-		  51 : res := (((info AND $00FF0000) shr 16) AND vbyte) <> vbyte;
+		  48 : res :=  ((info AND $000000FF)         AND vbyte) <> vbyte;
+		  49 : res := (((info AND $0000FF00) shr 8)  AND vbyte) <> vbyte;
+		  50 : res := (((info AND $00FF0000) shr 16) AND vbyte) <> vbyte;
+		  51 : res := (((info AND $FF000000) shr 24) AND vbyte) <> vbyte;
 		  // (info & val) = 0 (no val bits set)
-		  53 : res := ((info AND $000000FF)          AND vbyte) = 0;
-		  54 : res := (((info AND $0000FF00) shr 8)  AND vbyte) = 0;
-		  55 : res := (((info AND $00FF0000) shr 16) AND vbyte) = 0;
+		  52 : res :=  ((info AND $000000FF)         AND vbyte) = 0;
+		  53 : res := (((info AND $0000FF00) shr 8)  AND vbyte) = 0;
+		  54 : res := (((info AND $00FF0000) shr 16) AND vbyte) = 0;
+		  55 : res := (((info AND $FF000000) shr 24) AND vbyte) = 0;
 		else
 		begin
 			// invalid operator
@@ -579,9 +634,10 @@ begin
 		end;
 		end; { case }
 
-		if ((fop^ AND $40<>0) AND (result=false)) then break; { shortcut and }
+		if (((fop^ AND $c0)=$c0) AND (result=false)) then break; { shortcut and }
+		if (((fop^ AND $40)=$40) AND (result=true)) then break; { shortcut or  }
 		
-		if (fop^ AND $c0<>0) then
+		if ((fop^ AND $80) <> 0) then
 			result:=result AND res
 		else
 			result:=result OR res;
@@ -635,7 +691,7 @@ end;
 function TVolltext.ThirdLevelCheck_WithSortedFileRef(id,datum,gewicht,info:cardinal):boolean;
 var
 	name,titel	:	string;
-	e			:	integer;
+	i,e			:	integer;
 begin
 	result:=false; 
 	if rres>maxFind then EXIT;						// hier werden Doubletten NICHT mitgezählt!
@@ -643,14 +699,17 @@ begin
 	name:=fileRef[id]; titel:=fileRef.titel[id];
 	e:=fileRef.Error; 
 	if (e=0) and (name<>'') then begin  
-		inc(rres);
+		i:=0;
 		while (e=0) and (name<>'') do begin
 			if ((fFilter='') or 
-				(((reg=NIL) and ((pos(fFilter,name)>0)<>fFilterFilter)) or ((reg<>NIL) and (reg.Exec(name)<>fFilterFilter)))) then
-				tmpdup.AddWithFileRef(name,titel,id,datum,gewicht,info);
+				(((reg=NIL) and ((pos(fFilter,name)>0)<>fFilterFilter)) or ((reg<>NIL) and (reg.Exec(name)<>fFilterFilter)))) then begin
+					tmpdup.AddWithFileRef(name,titel,id,datum,gewicht,info);
+					inc(i); 
+				end;
 			name:=fileRef[0];		// ggf. Doubletten holen
 			e:=fileRef.Error;
 		end;
+		if i>0 then inc(rres);
 	end;
 	tmpdup.CustomSort;
 	treffer.AddDuplicates(tmpdup);
@@ -663,7 +722,7 @@ end;
 function TVolltext.ThirdLevelCheck_WithFileRef(id,datum,gewicht,info:cardinal):boolean;
 var
 	name,titel	:	string;
-	e				:	integer;
+	i,e			:	integer;
 begin
 	result:=false;
 	if rres>maxFind then EXIT;
@@ -671,14 +730,17 @@ begin
 	name:=fileRef[id]; titel:=fileRef.titel[id];
 	e:=fileRef.Error;
 	if (e=0) and (name<>'') then begin  
-		inc(rres); // count duplicates only one time. same as for sortedrefs
+		i:=0;
 		while (e=0) and (name<>'') do begin
 			if ((fFilter='') or 
-				(((reg=NIL) and ((pos(fFilter,name)>0)<>fFilterFilter)) or ((reg<>NIL) and (reg.Exec(name)<>fFilterFilter)))) then
+				(((reg=NIL) and ((pos(fFilter,name)>0)<>fFilterFilter)) or ((reg<>NIL) and (reg.Exec(name)<>fFilterFilter)))) then begin
 				treffer.AddWithFileRef(name,titel,id,datum,gewicht,info);
+				inc(i);
+			end;
 			name:=fileRef[0];		// ggf. Doubletten holen
 			e:=fileRef.Error; 
 		end;
+		if i>0 then inc(rres); // count duplicates only one time. same as for sortedrefs
 	end;
 
 	if e<>0 then vtError:=e else result:=true
@@ -706,13 +768,13 @@ var
 	bitFilterP	:	Pbyte;
 	vlcount		:	integer;
 begin
-   vlcount:=0;
 	if bitFilter<>0 then begin
 		bitFilterP:=@bitFilter;
-      vlbuf[0]:=81;
-      vlbuf[1]:=bitFilterP^;
-      vlcount:=2;
-	end;
+		vlbuf[0]:=4;
+		vlbuf[1]:=bitFilterP^;
+		vlcount:=2;
+	end else
+		vlcount:=0;
 	Suche:=vlSuche(such,von,bis,fileFilter,@vlbuf,vlcount,maxTreffer,sortOrder,overflow)
 end;
 
@@ -871,7 +933,7 @@ end;
 function TVolltext.InsertWords(worte:TStringList; fname,datum,md5Sum:string; info:cardinal; var id:cardinal):integer;
 var
 	insList				:	TIdList;
-	a					:	array[0..3] of string;
+	a						:	array[0..3] of string;
 	s,titel				:	string;
 	info_,inf			:	cardinal;
 	age					:	longint;
@@ -904,7 +966,7 @@ begin
 	end;
 
 	if id=0 then begin  
-		if useFileRef_>0 then 
+		if useFileRef>0 then 
 			id:=fileRef.NextID 
 		else
 		begin
@@ -924,7 +986,7 @@ begin
 			if md5Sum<>'' then titel:=titel+'*|*'+md5Sum;
 			Continue;
 		end;
-
+		
 		n:=split(s,',',a);
 		if a[0]='' then Continue;
 		if caseSensitive then s:=Trim(a[0]) else s:=AnsiUpperCase(Trim(a[0]));
@@ -963,7 +1025,7 @@ begin
 	insList.Free;
 
 	if words>0 then begin  
-		if useFileRef_>0 then result:=fileRef.NewFilename(fname,titel,id);
+		if useFileRef>0 then result:=fileRef.NewFilename(fname,titel,id) else result:=words;
 		log.Add('File "'+fname+'" with '+IntToStr(words)+' words inserted. Res='+IntToStr(result)+' FileID='+IntToStr(id),true);
 	end else
 	begin
@@ -998,10 +1060,11 @@ end; { TVolltext.ChainDuplicate }
 
 
 function TVolltext.GetWordsFromProgram(inFile:string; var worte:TStringList):integer;
+{$IFDEF LINUX}	
 var
-	s		:	THandleStream;
-	{$IFDEF LINUX}	f	:	text; {$ENDIF }
-
+	cmdFifo,f	:	text; 
+	s				:	string;	
+{$ENDIF }	
 begin
 	if ro then begin  
 		result:=-601; EXIT
@@ -1012,23 +1075,33 @@ begin
 	worte.Sorted:=false; worte.Duplicates:=dupAccept;
 
 	if tmpFile='' then 
-	{$IFDEF LINUX}
+{$IFDEF LINUX}
 	begin
-		popen(f,execProg+' '+inFile,'R');
-		// FEHLERBEHANDLUNG zur Zeit fraglich
-		s:=THandlestream.Create(TextRec(f).handle);
-		if s=NIL then begin
-			result:=-605; EXIT
+		try
+			if pos('NAMEDPIPE:',execProg)=1 then begin// named pipe eines laufenden(!) Programms nutzen
+				if length(execProg)>10 then s:=copy(execProg,11,255) else s:='/tmp/';
+				assign(cmdFIFO,s+'arcfiltercmd.fifo');
+				rewrite(cmdFIFO);
+				writeln(cmdFIFO,inFile);
+				close(cmdFIFO);
+				assign(f,s+'arcfilterres.fifo');
+				reset(f);
+			end else 
+				popen(f,execProg+' '+inFile,'R');
+
+			while not (eof(f)) do begin
+				readln(f,s);
+				worte.Add(s);
+			end;
+			close(f)
+		except
+			on E:Exception do result:=-603
 		end;
-		worte.LoadFromStream(s);
-		s.Free;
-		pclose(f);
 	end
-	{$ELSE}
+{$ELSE}
 		result:=-602
-	{$ENDIF}
-	else
-	begin
+{$ENDIF}
+	else begin
 		exec(execProg,infile+' '+tmpFile);
 		if (doserror=0) and FileExists(tmpFile) then begin  
 			worte.LoadFromFile(tmpFile);
@@ -1060,7 +1133,7 @@ begin
 	end;
 
 	result:=0;
-	if (inFile='') and (useFileRef_>0) then begin  
+	if (inFile='') and (useFileRef>0) then begin  
 		log.Add('Die Methode "InsertWordsFromFile" benötigt beim Betrieb mit Dateireferenzliste ("useFileRef") einen Dateinamen',true);
 		result:=-607; EXIT;
 	end;
@@ -1144,7 +1217,7 @@ begin
 end;
 
 
-function TVolltext.InsertWordsFromFiles(path,pattern,datum:string; doubletten:integer):integer;
+function TVolltext.InsertWordsFromFiles(path,pattern,datum:string):integer;
 var
 	worte,duplos										:	TStringList;
 	doneList												:	TIdList;
@@ -1161,7 +1234,7 @@ begin
 		log.Add('Database is readOnly! - Insert aborted',true);
 		result:=-601; EXIT
 	end;
-	if useFileRef_=0 then begin  
+	if useFileRef=0 then begin  
 		log.Add('Die Methode "InsertWordsFromFiles" unterstützt nicht den Betrieb ohne Dateireferenzliste ("useFileRef")',true);
 		result:=-606; EXIT
 	end;
@@ -1171,12 +1244,12 @@ begin
 	doneList:=TIdList.Create; 
 	if doubletten=3 then begin
 		duplos:=TStringList.Create;
-		duploFile:=dbName+'.doublettes';
+		duploFile:=dbCfg+'.doublettes';
 		duplos.Sorted:=true; duplos.Duplicates:=dupIgnore;
 		if FileExists(duploFile) then duplos.LoadFromFile(duploFile);
 	end;
 	log.Add('Scanning Files '+pattern+' in '+path,true);
-	scanner:=TDirScanner.Create(dbName+'.unfiles.txt');
+	scanner:=TDirScanner.Create(dbCfg+'.unfiles.txt');
 	n:=scanner.Finde(path,pattern,16);	// von "scanner" geborgte Liste
 	log.Add(IntToStr(n)+' Files to archive',true);
 	for i:=0 to n-1 do
@@ -1383,7 +1456,7 @@ begin
 		lID:=secunda.occ[i].dw1;
 	end;
 	lID:=0;
-	
+
 	for i:=0 to secunda.occ.Count-1 do begin	// id=dw1, pos=dw2, datum=dw3, gewicht=dw4 (hier unbenutzt), info=dw5
 		inc(checked);
 		el:=secunda.occ[i];
@@ -1421,13 +1494,16 @@ begin
 	if source<>NIL then secunda:=source;	//	für externe Aufrufer (z.B. jodad)
 	if startDatum<>'' then minAge:=word(Age95(startDatum)) else minAge:=0;
 // bei reiner Optimierung ist kein REF-Handling nötig - Zieldatei neu (leer) und keine Filter angegeben:
-	fastMode:=(useFileRef_=1) and (btree.WordCount=0) and (minAge=0) and (not wordCheck) and (not fileCheck) and (not destructive);
-	if fastMode then log.Add('Using fastMode: REF file will be copied',true);
+	fastMode:=(useFileRef>0) and (btree.WordCount=0) and (minAge=0) and (not wordCheck) and (not fileCheck) and (not destructive);
+	if fastMode then begin
+		if (not ro) and (useFileRef=2) then fileRef.Commit;
+		log.Add('Using fastMode: REF file will be copied',true);
+	end;
 	if fileCheck then begin
 		fileList:=THash.Create;
 	end;		
 
-	if (useFileRef_=0) or fastMode then 
+	if (useFileRef=0) or fastMode then 
 		ScanCluster:=@ScanCluster_WithoutFileRef
 	else
 		ScanCluster:=@ScanCluster_WithFileRef;
@@ -1446,7 +1522,7 @@ begin
 		el:=secunda.btree[i];
 		if not wordCheck or (Wortzeichen(el.s) and not unworte.Find(el.s,j)) then begin  
 			if (verbose) and (i mod 1000=0) then begin   
-				write(#13,checked:10,' (',optimized:10,') von ',secunda.btree.AllCount,' = ',((100*checked)/secunda.btree.AllCount):5:1,'%');
+				write(#13,checked:10,' (',optimized:10,') von ',secunda.btree.AllCount,' = ',(checked/secunda.btree.AllCount)*100:5:1,'%');
 			end;
 
 			if not btree.SearchWord(el.s,dummy,key) then key:=0; // neuer Begriff in der primären DB
@@ -1461,19 +1537,28 @@ begin
 			checked+=el.z;
 	end;
 
-	if verbose then writeln(#13,checked:10,' (',optimized:10,') von ',secunda.btree.AllCount,' = ',100*(checked/(secunda.btree.AllCount)):5:1,'%    ');
+	if verbose then writeln(#13,checked:10,' (',optimized:10,') von ',secunda.btree.AllCount,' = ',(checked/secunda.btree.AllCount)*100:5:1,'%    ');
 	idList.Free; idList:=NIL;
 	fileList.Free; fileList:=NIL;
 	log.Add('Merging of '+IntToStr(n)+' words done with result='+IntToStr(vtError),true);
-	if destructive then secunda.Clear;
+	if destructive then 
+		secunda.Clear
 {$IFDEF LINUX}	
-	if fastMode then shell('cp -pf '+secunda.dbName+'.ref '+dbName+'.ref');
+	else if fastMode then begin
+		if secunda.tempDB then secunda.fileRef.Commit;
+		shell('cp -pf '+secunda.dbName+'.ref '+dbName+'.ref')
+	end
 {$ENDIF}
+	;
 	result:=vtError; vtError:=0;
 end;
 
 
 function TVolltext.MergeDB(const sourceDB,startDatum:string; wordCheck,fileCheck,verbose:boolean):integer;
+var
+	p					:	integer;
+	sourceDBName	:	string;
+	
 begin
 	if ro then begin
 		result:=-1; EXIT
@@ -1489,6 +1574,21 @@ begin
 
 	result:=ExecMerge(NIL,startDatum,wordCheck,fileCheck,false,verbose);
 	secunda.Free;
+	if tempDB then begin
+		p:=pos(':',sourceDB);
+		if p>0 then sourceDBName:=copy(sourceDB,p+1,255) else sourceDBName:=sourceDB;
+		DeleteFile(sourceDBName+'.btf'); 
+		DeleteFile(sourceDBName+'.ocl');
+		btree.Commit;
+		occ.Commit;
+		if useFileRef>0 then begin
+			DeleteFile(sourceDBName+'.ref');
+			fileRef.Commit;
+			RenameFile(dbName+'.ref',sourceDBName+'.ref');
+		end;
+		RenameFile(dbName+'.btf',sourceDBName+'.btf');
+		RenameFile(dbName+'.ocl',sourceDBName+'.ocl');
+	end;
 end;
 
 
@@ -1551,13 +1651,12 @@ begin
 			res:=InvalidateWord(wort,id);			// angehängten Flags beim Laden unerkannt) erst HIER ignorieren
 			if res>0 then words+=res;
 		end;
-// writeln(wort:20,res:10,words:10);
 	except
 		on EConvertError do ;						// Eintrag überspringen
 	end;
 
 	tmpList.Free;
-	if (words>0) and (useFileRef_>0) then result:=fileRef.InvalidateFilename(id);
+	if (words>0) and (useFileRef>0) then result:=fileRef.InvalidateFilename(id);
 
 	if result=0 then begin
 		if words>0 then
@@ -1609,5 +1708,19 @@ begin
 	worte.Free;
 end;
 
+
+procedure TVolltext.SetLockFile(createFile:boolean);
+var
+	h	:	longint;
+begin
+	if createFile then begin
+		h:=FileCreate(dbName+'.LOCK');
+		if h>0 then FileClose(h);
+		dbLocked:=true;
+	end else if dbLocked then begin
+		DeleteFile(dbName+'.LOCK');
+		dbLocked:=false;
+	end;
+end;
 
 end.

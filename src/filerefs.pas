@@ -36,9 +36,7 @@ uses
 type
 	CFileRef		=	class of TFileRef;
 	TFileRef=	class
-{$WARNINGS OFF}
-						constructor Create(const name:string; readOnly:boolean; var res:integer); VIRTUAL;
-{$WARNINGS ON}
+						constructor Create(const name:string; readOnly:boolean; var res:integer);
 						destructor  Destroy; OVERRIDE;
 						function    NewFilename(const name,info:string; var id:cardinal):integer; VIRTUAL; ABSTRACT;
 						function 	ChainFilename(const name: string; lastId:cardinal; var id:cardinal):integer; VIRTUAL; ABSTRACT;
@@ -52,39 +50,40 @@ type
 						aktName,
 						aktTitel	:	string;
 						aktID,
-						aktPtr	:	cardinal;
+						aktPtr,
+						top		:	cardinal;
 						frError	:	integer;
+						dirty,
 						ro			:	boolean;
 						
 						function		TellError:integer;
-						function		NextRefID:cardinal; VIRTUAL; ABSTRACT;
 						function    GetFilename(id:cardinal):string; VIRTUAL; ABSTRACT;
 						function    GetTitel(id:cardinal):string; VIRTUAL; ABSTRACT;
 						function		ReadRecord(id:cardinal):integer; VIRTUAL; ABSTRACT;
+						procedure	WriteHeader;
 												
 						PUBLIC
 						property    Error:integer read TellError;
-						property		NextID:cardinal read NextRefID;
+						property		NextID:cardinal read top;
 						property    filename[i:cardinal]:string read GetFilename; DEFAULT;
 						property    titel[i:cardinal]:string read GetTitel;
 					end;
 
 	TDynamicFileRef=class(TFileRef)
-						constructor Create(const name:string; readOnly:boolean; var res:integer); OVERRIDE;
+						constructor Create(const name:string; readOnly:boolean; var res:integer);
 						destructor  Destroy; OVERRIDE;
 						function    NewFilename(const name,info:string; var id:cardinal):integer; OVERRIDE;
 						function 	ChainFilename(const name: string; lastId:cardinal; var id:cardinal):integer; OVERRIDE;
 						function		InvalidateFilename(id:cardinal):integer; OVERRIDE;
 						
 						PROTECTED
-						function		NextRefID:cardinal; OVERRIDE;
 						function    GetFilename(id:cardinal):string; OVERRIDE;
 						function    GetTitel(id:cardinal):string; OVERRIDE;
 						function		ReadRecord(id:cardinal):integer; OVERRIDE;
 					end;
 
 	TMemFileRef=class(TDynamicFileRef)	// gleiche Funktionalität, aber im Arbeitsspeicher
-						constructor Create(const name:string; readOnly:boolean; var res:integer); OVERRIDE;
+						constructor Create(const name:string; initSize,growSize:longint; readOnly:boolean; var res:integer); 
 						destructor 	Destroy; OVERRIDE;
 						procedure 	Commit; OVERRIDE;
 						procedure   Clear;  OVERRIDE;
@@ -92,8 +91,12 @@ type
 
 
 IMPLEMENTATION
+uses
+	JStreams; 
 const
-	align		=	4;		// Rundung der IDs auf DWord-Grenze / ID*rund=Filepos
+	align						=	 4;				// Rundung der IDs auf DWord-Grenze / ID*rund=Filepos
+	minTop					= 512 div align;	// minimale Dateigröße bzw. min. Schlüssel
+	cs		:	string[95] 	= ' (c) jo@magnus.de - FileRefs is published under LGPL on http://ioda.sourceforge.net/ '#0;
 
 type
 	EFWrongFileType=	class(Exception);
@@ -102,25 +105,24 @@ type
 // Abstrakter Vorfahre
 
 constructor TFileRef.Create(const name:string; readOnly:boolean; var res:integer);
-const
-	s	:	string[31]	=	'(c) jo@magnus.de 2001';
 begin
 	inherited Create;
 	res:=0; aktName:=''; aktTitel:=''; aktPtr:=0;
-	refStream:=NIL; myFileName:=name+'.ref'; ro:=readOnly; 
+	refStream:=NIL; myFileName:=name+'.ref'; dirty:=false; ro:=readOnly; 
 
 	try
-		if FileExists(myFileName) then
-		begin
+		if FileExists(myFileName) then begin
 			if readOnly then 
 				refStream:=TFileStream.Create(myFileName,fmOpenRead)
 			else
 				refStream:=TFileStream.Create(myFileName,fmOpenReadWrite);
-		end else
-		begin
+			top:=(refStream.Size + align-1) div align;
+			if top<minTop then top:=minTop;
+		end else	begin
 			if readOnly then raise EFWrongFileType.Create('Datei nicht vorhanden');
 			refStream:=TFileStream.Create(myFileName,fmCreate);
-			refStream.Write(s[1],length(s));		//	erste id darf nicht null sein
+			WriteHeader;
+			top:=minTop;
 		end;
 
 	except
@@ -139,12 +141,28 @@ begin
 end;
 
 
+procedure TFileRef.WriteHeader;
+begin
+	refStream.Seek(0,soFromBeginning);
+	refStream.Write(cs[1],length(cs));		//	erste id darf nicht null sein
+	refStream.Seek(minTop*align-1,soFromBeginning);
+	refStream.Write(#0,1);
+end;
+
+
 procedure TFileRef.Commit;
 begin end;
 
 
 procedure TFileRef.Clear;
-begin end;
+begin 
+	if ro then EXIT;
+	with refStream do begin
+		size:=0; position:=0;
+	end;
+	WriteHeader;
+	top:=minTop;
+end;
 
 
 function TFileRef.TellError:integer;
@@ -167,21 +185,16 @@ begin
 end;
 
 
-function TDynamicFileRef.NextRefID:cardinal;
-begin
-	result:=(refStream.Size + align-1) div align;
-end;
-
-
 function TDynamicFileRef.NewFilename(const name,info:string; var id:cardinal):integer;
 begin
-	id:=NextRefID;
+	id:=top;
 	try
 		refStream.Seek(id*align,soFromBeginning);
 		refStream.WriteDWord(0);					// Verkettung auf Null setzen
 		refStream.WriteAnsiString(name);
 		refStream.WriteAnsiString(info);
-		result:=0;
+		top:=(refStream.position + align-1) div align;
+		result:=0; dirty:=true;
 	except
 		on EStreamError do result:=-404;
 	end;
@@ -191,8 +204,7 @@ end;
 
 function TDynamicFileRef.ChainFilename(const name: string; lastId:cardinal; var id:cardinal):integer;
 begin
-	if lastID=0 then
-	begin
+	if lastID=0 then begin
 		result:=-406; EXIT
 	end;
  	result:=NewFilename(name,'',id);
@@ -200,6 +212,7 @@ begin
  	try
 		refStream.Seek(lastId*align,soFromBeginning);
 		refStream.WriteDWord(id);					// Verkettung aktualisieren
+		dirty:=true;
 	except
 		on EStreamError do result:=-404;
 	end;
@@ -208,8 +221,7 @@ end;
 
 function TDynamicFileRef.InvalidateFilename(id:cardinal):integer;
 begin
-	if (id=0) or (id>=NextRefID) then
-	begin
+	if (id=0) or (id>=top) then begin
 		result:=-407; EXIT
 	end;
 
@@ -218,7 +230,7 @@ begin
 		refStream.WriteDWord(0);					// Verkettung (falls vorhanden) auf Null setzen
 		refStream.WriteAnsiString('');
 		refStream.WriteAnsiString('');
-		result:=0;
+		result:=0; dirty:=true;
 	except
 		on EStreamError do result:=-408;
 	end;
@@ -231,7 +243,6 @@ var
 begin
 	result:=0; 
 	if id=aktID then EXIT;
-
   	try
 		refStream.Seek(id*align,soFromBeginning);
 		aktPtr:=refStream.ReadDWord;
@@ -240,7 +251,6 @@ begin
 		if s<>'' then aktTitel:=s;					// nur bei der Wurzel eingetragen (sonst leer)
 		aktID:=id;
 	except
-//		on E:Exception do writeln('EX=',E.message,' id=',id);
 		on EStreamError do result:=-404
 		else result:=-405;
 	end;
@@ -253,10 +263,8 @@ var
 begin
 	if id>0 then
 		res:=ReadRecord(id)
-	else
-	begin
-		if aktPtr=0 then 		// no more files...
-		begin
+	else begin
+		if aktPtr=0 then begin 					// no more files...
 			result:=''; res:=0; EXIT
 		end;
 		res:=ReadRecord(aktPtr);
@@ -264,8 +272,7 @@ begin
 
 	if res=0 then 
 		result:=aktName 
-	else 
-	begin
+	else begin
 		result:='';
 		frError:=res;
 	end;
@@ -279,8 +286,7 @@ begin
 	res:=ReadRecord(id);
 	if res=0 then 
 		result:=aktTitel 
-	else 
-	begin
+	else begin
 		result:='';
 		frError:=res;
 	end;
@@ -289,13 +295,14 @@ end;
 
 // Dynamische Dateiliste im Speicher
 
-constructor TMemFileref.Create(const name:string; readOnly:boolean; var res:integer);
+constructor TMemFileref.Create(const name:string; initSize,growSize:longint; readOnly:boolean; var res:integer);
 begin
 	inherited Create(name,readOnly,res);
 	if res<>0 then EXIT;
-	refStream.Free;							// TFileStream freigeben
-	refStream:=TMemoryStream.Create;
-	with refStream as TMemoryStream do LoadFromFile(myFileName);
+	refStream.Free;								// TFileStream freigeben
+	refStream:=TLargeMemoryStream.Create(0,growSize);
+	with refStream as TLargeMemoryStream do LoadFromFile(myFileName);
+	if (initSize>refStream.Size) and (not ro) then with refStream as TLargeMemoryStream do SetSize(initSize); // erst hier sinnvoll, weil LoadFromFile die Capacity einstellt
 end;
 
 
@@ -310,17 +317,21 @@ procedure TMemFileref.Commit;
 var
 	store	:	TFileStream;
 begin
-	if ro then EXIT;
+	if ro or (not dirty) then EXIT;
 	refStream.Seek(0,soFromBeginning);
 	store:=TFileStream.Create(myFileName,fmCreate);
-	store.CopyFrom(refStream,refStream.Size);
+	store.CopyFrom(refStream,top*align);
 	store.Free;
+	dirty:=false;
 end;
 
 
 procedure TMemFileRef.Clear;
 begin
-	with refStream as TMemoryStream do Clear;
+	if ro then EXIT;
+	with refStream as TLargeMemoryStream do Clear;
+	inherited Clear;
+	dirty:=true;
 end;
 
 

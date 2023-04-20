@@ -109,6 +109,7 @@ type
 							allCounter,
 							nodeCounter:cardinal;
 							bayError	:	integer;
+							dirty,
 							multiple,
 							stopped	:	boolean;
 
@@ -171,7 +172,6 @@ const
 	tNodeSize=  tNodeHeaderSize+sizeof(TIOBuf);	// effektive Knotengröße (ohne Zeigerarray) DIES WIRD GESPEICHERT & GELESEN!
 	tValSizeN = 12+1;										// Länge der DWord-Werte+Stringlänge in TVal (= TVal mit Leerstring)
 	rootPos	=  512;
-const
 	cs		:	string[95] = ' (c) jo@magnus.de - BTreeFlex is published under LGPL on http://ioda.sourceforge.net/ '#0;
 
 
@@ -277,7 +277,7 @@ end;
 constructor TBayBaum.Create;
 begin
 	inherited Create;
-	wordCounter:=0; nodeCounter:=1; allCounter:=0;
+	wordCounter:=0; nodeCounter:=1; allCounter:=0; dirty:=false;
 	top:=rootPos; bayError:=0; multiple:=false; // "multipleItems" is not yet implemented!
 	fillDWord(root,sizeOf(TNode) shr 2,0);
 	resList:=TResList.Create;
@@ -945,12 +945,6 @@ begin
 end;
 
 
-procedure TFileBayBaum.Commit;
-begin 
-	WriteHeader;
-end;
-
-
 function TFileBayBaum.GetElem(var el:TNode; id:cardinal):boolean;
 var
 	i,j	:	integer;
@@ -985,12 +979,27 @@ begin
 	if el.key=rootPos then CopyNode(el,root); 
 	elStream.Seek(el.key,soFromBeginning);
 	elStream.Write(el,tNodeSize);
-	result:=true;
+	dirty:=true; result:=true;
+end;
+
+
+procedure TFileBayBaum.Commit;
+begin 
+	WriteHeader;
 end;
 
 
 procedure TFileBayBaum.Clear;
-begin end;
+begin 
+	with elStream do begin
+		size:=0; position:=0;
+	end;
+	wordCounter:=0; nodeCounter:=1; allCounter:=0; bayError:=0; 
+	ClearNodeContent(root);
+	root.key:=rootPos;
+	SetElem(root);
+	top:=rootPos+tNodeSize;
+end;
 
 
 // Bayerbaum im Speicher
@@ -1002,7 +1011,7 @@ begin
 	elStream.Free;							// TFileStream freigeben
 	elStream:=TLargeMemoryStream.Create(0,growSize);	// als TLargeMemorystream neu anlegen
 	with elStream as TLargeMemoryStream do LoadFromFile(myFileName);
-	if (initSize>0) and (not ro) then with elStream as TLargeMemoryStream do SetSize(initSize); // erst hier sinnvoll, weil LoadFromFile die Capacity einstellt
+	if (initSize>elStream.Size) and (not ro) then with elStream as TLargeMemoryStream do SetSize(initSize); // erst hier sinnvoll, weil LoadFromFile die Capacity einstellt
 end;
 
 
@@ -1015,12 +1024,9 @@ end;
 
 procedure TMemBayBaum.Clear;
 begin
+	if ro or (elStream=NIL) then EXIT;
 	with elStream as TLargeMemoryStream do Clear;
-	wordCounter:=0; nodeCounter:=1; allCounter:=0;
-	top:=rootPos; bayError:=0; 
-	ClearNodeContent(root);
-	root.key:=rootPos;
-	SetElem(root);
+	inherited Clear;
 end;
 
 
@@ -1028,12 +1034,13 @@ procedure TMemBayBaum.Commit;
 var
 	store	:	TFileStream;
 begin
-	if ro or (elStream=NIL) then EXIT;
+	if ro or (not dirty) or (elStream=NIL) then EXIT;
 	inherited Commit;
 	elStream.Seek(0,soFromBeginning);
 	store:=TFileStream.Create(myFileName,fmCreate);
 	store.CopyFrom(elStream,top);
 	store.Free;
+	dirty:=false;
 end;
 
 end.

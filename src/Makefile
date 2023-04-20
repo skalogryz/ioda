@@ -7,7 +7,7 @@ TAR=/bin/tar
 RM=/bin/rm -f
 INSTALL=/usr/bin/install
 
-TARGETS=joda jodad libjodafulltext.so checkdb checkbtree convert05 jodacgi
+TARGETS=joda jodad libjodafulltext.so checkdb checkbtree jodacgi
 
 JODAUNITS=regexpr.ppu md5.ppu unicode.ppu jstreams.ppu jstrings.ppu \
 	btreeflex.ppu idlist.ppu occtable.ppu filerefs.ppu \
@@ -45,8 +45,6 @@ checkdb: $(JODAUNITS) checkdb.pas
 checkbtree: $(JODAUNITS) checkbtree.pas
 	$(PPC) checkbtree.pas
 
-convert05: $(JODAUNITS) convert05.pas
-	$(PPC) convert05.pas
 
 libjodafulltext.so: $(JODAUNITS) jodafulltext.pas
 	$(PPC) jodafulltext.pas

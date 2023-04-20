@@ -22,12 +22,50 @@
 */
 
 /*
+ *  Open Modes
+ */
+typedef enum {
+  ReadWriteDB       =   0,
+  ReadOnlyDB        =   1,
+  ReadOnlyDBNoCache =   2,
+  undefinedOpenMode = 255
+} jodaOpenMode;
+
+/*
  * Sort Order.
  */
 typedef enum {
-  joda_sortByWeight = 0x0001,
-  joda_sortByAge    = 0x0002
+  sortNot           = 0x0000,
+  sortByWeight      = 0x0001,
+  sortByAge         = 0x0002
 } jodaSortOrder;
+
+/*
+ * vlSearch flags
+ */
+typedef enum {
+  /* concat with previos result: */
+  vlOR   = 0x00,
+  vlSOR  = 0x40,
+  vlAND  = 0x80,
+  vlSAND = 0xc0,
+  /* test what byte: */
+  vlB1   = 0x00, /* 0x000000FF */
+  vlB2   = 0x01, /* 0x0000FF00 */
+  vlB3   = 0x02, /* 0x00FF0000 */
+  vlB4   = 0x03, /* 0xFF000000 */
+  /* with that op: */
+  vlEQ   = 0x04, /* info = val */
+  vlLT   = 0x08, /* info < val */
+  vlGT   = 0x0c, /* info > val */
+  vlAEQ  = 0x10, /* info & val = val */
+  vlAON  = 0x14, /* info & val <> 0 */
+  vlNE   = 0x24, /* info != val */
+  vlGE   = 0x28, /* info >= val */
+  vlLE   = 0x2c, /* info <= val */
+  vlANE  = 0x30, /* info & val <> val */
+  vlAOF  = 0x34  /* info & val = 0 */
+} jodaVLFilter;
 
 typedef int jodaHandle;
 
@@ -55,7 +93,7 @@ typedef struct {
  *
  * returns a database handle (greater 0) or an error (0 or less).
  */
-jodaHandle jodaOpen  ( char *dbname, int ro );
+jodaHandle jodaOpen  ( char *dbname, jodaOpenMode ro );
 
 /*
  * int jodaClose ( handle )

@@ -21,7 +21,7 @@ uses
 	CMEM,Classes,SysUtils,JStrings,ConfigReader,Volltext;
 
 const
-	version			=	'3.3';
+	version			=	'3.4';
 type
 	EConfigError	=	class(Exception);
 
@@ -42,14 +42,15 @@ end;
 
 
 var
-	cfg											:	TConfigReader;
-	vt												:	TVolltext;
-	db,result,inFile,wordListFile,such,
-	fFilter,bFilter,von,bis 				:	string;
-	vlBuf											:	array[0..255] of byte;
-	id,info										:	cardinal;
-	res,i,vlCount,sortOrder,maxTreffer	:	integer;
-	overflow  									:	boolean;
+	cfg														:	TConfigReader;
+	vt,targetVT												:	TVolltext;
+	db,db_,targetDB,result,inFile,wordListFile,
+	such,fFilter,bFilter,von,bis 						:	string;
+	vlBuf														:	array[0..255] of byte;
+	id,info													:	cardinal;
+	res,i,p,vlCount,sortOrder,maxTreffer			:	integer;
+	overflow,doLock										:	boolean;
+	openMode													:	TDbMode;
 
 begin
 	try
@@ -57,16 +58,17 @@ begin
 		cfg:=TConfigReader.Create;
 		if copy(paramstr(1),1,1)<>'-' then cfg.Add('-q');
 		i:=cfg.ReadCommandLine+1;
-		db:=ChangeFileExt(paramstr(i),'');
-		res:=cfg.ReadConfigFile(db);
-		if res<=0 then raise EConfigError.Create('Fehler beim Lesen der Konfigurations-Datei "'+db+'" - Code='+IntToStr(res));
-		res:=0;
-	    (*
-		 *  use openMode from cfg, this might have been overridden on the
-		 *  commandline
-		 *  (was: undefinedOpenMode)
-		 *)
-		vt:=TVolltext.Create(db,TDBMode(cfg.Int['openMode']),res);
+		if cfg['openMode']<>'' then openMode:=TdbMode(cfg.Int['openMode']) else openMode:=undefinedOpenMode;
+		db:=ChangeFileExt(paramstr(i),''); db_:=db;
+		if (cfg.Bool['-opt']) then begin
+			p:=pos(':',db_); 			// Sonderfall Optimize: Target ist temporäre DB, MergeDB benennt später in SourceDB um
+			if p>0 then
+				db:=copy(db_,1,p)	 	// Quelle ist bereits eine cloned DB: "echten" Datenbanknamen für temp. TargetDB weglassen
+			else
+				db:=db+':';				// Quelle besitzt eigene Config
+		end;
+		res:=0; doLock:=cfg.Bool['-lockdb'];
+		vt:=TVolltext.Create(db,TDBMode(openMode),res);
 		if res<>0 then raise EConfigError.Create('Fehler beim Öffnen der Datenbank "'+db+'" - Code='+IntToStr(res));
 
 		if cfg.Bool['-x'] or cfg.Bool['-xu'] or cfg.Bool['-q'] or cfg.Bool['-qu'] then begin
@@ -98,28 +100,47 @@ begin
 			if overflow then result:=result+'+'+#10 else result:=result+#10;
 			if (not cfg.Bool['-count']) then for i:=0 to res-1 do result:=result+vt[i]+#10;
 			writeln(result);
-		end else if cfg.Bool['-a'] then
-			vt.InsertWordsFromFiles(paramstr(i+1),paramstr(i+2),paramstr(i+3),cfg.Int['Doubletten'])
-		else if cfg.Bool['-s'] then begin
+		end else if cfg.Bool['-a'] then begin
+			if (paramCount>=i+3) and (paramstr(i+3)<>'.') then von:=paramstr(i+3) else von:='';	// Datum
+			if doLock then vt.SetLockFile(true);
+			vt.InsertWordsFromFiles(paramstr(i+1),paramstr(i+2),von);
+			if doLock then vt.SetLockFile(false);
+			if cfg.Bool['-m'] then begin
+				targetDB:=ChangeFileExt(paramstr(i+4),'');
+				targetVT:=TVolltext.Create(targetDB,ReadWriteDB,res);
+				if res<>0 then raise EConfigError.Create('Fehler beim Öffnen der Zieldatenbank "'+targetDB+'" - Code='+IntToStr(res));
+				if doLock then targetVT.SetLockFile(true);
+				targetVT.ExecMerge(vt,cfg['startDatum'],cfg.Bool['-wordcheck'],cfg.Bool['-filecheck'],cfg.Bool['-kill'],cfg.Bool['-verbose']);
+				targetVT.Free;
+			end;
+		end else if cfg.Bool['-s'] then begin
 			inFile:=''; wordListFile:=''; von:=''; info:=0; id:=0;
 			if (paramCount>=i+1) and (paramstr(i+1)<>'.') then wordListFile:=paramstr(i+1);
 			if (paramCount>=i+2) and (paramstr(i+2)<>'.') then inFile:=paramstr(i+2);
 			if (paramCount>=i+3) and (paramstr(i+3)<>'.') then von:=paramstr(i+3);	// Datum
 			if (paramCount>=i+4) and (paramstr(i+4)<>'.') then info:=StrToIntDef(paramstr(i+4),0);
 			if (paramCount>=i+5) and (paramstr(i+5)<>'.') then id:=StrToIntDef(paramstr(i+5),0);
+			if doLock then vt.SetLockFile(true);
 			vt.InsertWordsFromFile(wordListFile,inFile,von,info,id);
 		end else if cfg.Bool['-e'] then begin
 			if (paramCount>=i+1) and (paramstr(i+1)<>'.') then wordListFile:=paramstr(i+1);
 			if (paramCount>=i+2) and (paramstr(i+2)<>'.') then id:=StrToInt(paramstr(i+2));
+			if doLock then vt.SetLockFile(true);
 			vt.InvalidateEntryFromFile(wordListFile,id);
 		end else	if cfg.Bool['-d'] then begin
 			if (paramCount>=i+1) and (paramstr(i+1)<>'.') then inFile:=paramstr(i+1);
 			if (paramCount>=i+2) and (paramstr(i+2)<>'.') then id:=StrToInt(paramstr(i+2));
+			if doLock then vt.SetLockFile(true);
 			vt.InvalidateEntryFromProgram(inFile,id);
 		end else	if cfg.Bool['-p'] then begin
-			vt.InsertWordsFromPipe();
+			if doLock then vt.SetLockFile(true);
+			vt.InsertWordsFromPipe()
 		end else if cfg.Bool['-m'] then begin
-			vt.MergeDB(paramstr(i+1),paramstr(i+2),cfg.Bool['-wordcheck'],cfg.Bool['-filecheck'],cfg.Bool['-verbose']);
+			if doLock then vt.SetLockFile(true);
+			vt.MergeDB(paramstr(i+1),paramstr(i+2),cfg.Bool['-wordcheck'],cfg.Bool['-filecheck'],cfg.Bool['-verbose'])
+		end else if cfg.Bool['-opt'] then begin
+			if doLock then vt.SetLockFile(true);
+			vt.MergeDB(db_,paramstr(i+1),cfg.Bool['-wordcheck'],cfg.Bool['-filecheck'],cfg.Bool['-verbose'])
 		end else 
 			Help;
 

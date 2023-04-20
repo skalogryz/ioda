@@ -1,6 +1,8 @@
 library jodafulltext;
 
-(* Copyright (C) 1994-2004  jo@magnus.de
+(* Copyright (C) 1994-2005  Jochen Magnus <jo@magnus.de>
+                            Oliver Graf <ograf@rz-online.net>
+ 
    This library is free software; you can redistribute it and/or modify it 
 	under the terms of the GNU Lesser General Public License as published by
 	the Free Software Foundation; either version 2.1 of the License, or 
@@ -29,10 +31,10 @@ type
 	PUV 			 = ^cardinal;
  
 var
-	vti	: integer;
 	vtdbs : array [1 .. VTMAXDBS] of TVolltext;
 		  
 		  
+
 function jodaOpen(dbname : PChar; ro : integer): integer; cdecl; export;
 var
 	vtidx, res	: integer;
@@ -313,9 +315,20 @@ end;
 
 
 exports	
-	jodaOpen, jodaClose, jodaSortIssues, jodaSortIssuesPP, jodaSortIssuesOLP, jodaSearch, jodaVLSearch, jodaGetQuery, jodaGetHit, jodaGetHits, jodaGetOneHit, jodaStore, jodaInvalidateEntry, jodaChainDuplicate;
+	jodaOpen, jodaClose,
+   jodaSortIssuesPP, jodaSortIssuesOLP,
+   jodaStore, jodaInvalidateEntry, jodaChainDuplicate,
+   jodaSearch, jodaVLSearch,
+   jodaGetQuery, jodaGetHit, jodaGetHits,
+   (* alternative Interface to the above line: *)
+   jodaSortIssues, jodaGetOneHit, jodaGetAllHits;
 
-
+var
+	i	: integer;
 begin
-	for vti:=1 to VTMAXDBS do vtdbs[vti]:=nil;
+	try
+		for i:=1 to VTMAXDBS do vtdbs[i]:=NIL;
+	except
+		on E:Exception do writeln('Cannot Initalize libjodafulltext!');
+	end;
 end.

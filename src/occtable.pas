@@ -31,7 +31,6 @@ uses
 const
 	defCluster	=	2;    		               // min. Voll-Einträge/Cluster
 	maxCluster	= 8192;                       // max. Voll-Einträge/Cluster
-	largestOccLen=12;									// derzeit maximal 12-Byte OccLen
 
 type
 { Bedeutung der Bits 0 und 1: 
@@ -105,6 +104,7 @@ type
 		occStream	:	TStream;
 		resList		:	TDWList;
 		myFileName	:	string;
+		dirty,
 		ro,
 		recycling	:	boolean;
 
@@ -113,6 +113,7 @@ type
 		function		GetData(p:PByte; var r:cardinal; min:cardinal):boolean;
 		function		GetItem(p:PByte; var last:boolean; var i,r,id,datum,info:cardinal; callback:TTraverse; resi:TDWList):boolean;
 		procedure 	SetContReadLen(len:cardinal);
+		procedure	WriteHeader;
 //		procedure 	CallbackNOP(elID,elPos,elDat,elWeight,elInf:cardinal); // Beispiel eines Callbacks
 		
 		PUBLIC
@@ -153,9 +154,10 @@ const
 	wIsID					= $0001;
 	wIsLast				= $0002;
 	wIsLen				= $0002;
+	minKey				=	 512;
 	cluDaLen	:	array[boolean] of cardinal = (4,8);
 	escMask	:	array[boolean] of cardinal = (dwIsIDInFullCluster,dwIsID);
-
+	cs			:	string[95] = ' (c) jo@magnus.de - OccTable is published under LGPL on http://ioda.sourceforge.net/ '#0;
 // Klassenmethoden:
 
 class function TClusterMaster.CheckoutType(name:string; var size:longint):integer;
@@ -201,7 +203,7 @@ constructor TClusterMaster.Create(const name:string; elSize:longint; readOnly,en
 begin
 	inherited Create;
 	occStream:=NIL; resList:=NIL; firstOcc:=NIL; occ:=NIL; tmpOcc:=NIL;
-	res:=0; myFileName:=name+'.ocl'; ro:=readOnly;
+	res:=0; myFileName:=name+'.ocl'; ro:=readOnly; dirty:=false;
 	try
 		if FileExists(myFileName) then begin
 			if readOnly then 
@@ -209,15 +211,14 @@ begin
 			else
 				occStream:=TFileStream.Create(myFileName,fmOpenReadWrite);
 			occLen:=occStream.ReadDWord; 
-			nextKey:=occStream.Size and $FFFFFFFF;
-		end else
-		begin
+			nextKey:=occStream.Size; 
+			if nextKey<minKey then nextKey:=minKey;
+		end else	begin
 			if readOnly then raise EFWrongFileType.Create('ReadOnly mode requestet - may not create file!');
-			occStream:=TFileStream.Create(myFileName,fmCreate);
 			occLen:=abs(elSize);
-			nextkey:=32;
-			occStream.Seek(0,soFromBeginning);
-			occStream.WriteDWord(occLen);
+			if (occLen<>8) and (occLen<>10) and (occLen<>12) then raise EFWrongFileType.Create('Invalid value of elSize (value of "useBigOccList" in config file may be [+/-] 8,10 or 12)');
+			occStream:=TFileStream.Create(myFileName,fmCreate);
+			WriteHeader;
 		end;
 		
 	except
@@ -260,12 +261,27 @@ begin
 end;
 
 
-procedure  TClusterMaster.Commit; 
+procedure TClusterMaster.WriteHeader;
+begin
+	occStream.Seek(0,soFromBeginning);
+	occStream.WriteDWord(occLen);
+	occStream.Write(cs[1],length(cs));
+	occStream.Seek(minKey-1,soFromBeginning);
+	occStream.Write(#0,1);
+	nextkey:=minKey;
+end;
+
+procedure TClusterMaster.Commit; 
 begin end;
 
 
 procedure TClusterMaster.Clear;
-begin end;
+begin 
+	with occStream do begin
+		size:=0; position:=0;
+	end;
+	WriteHeader;
+end;
 
 
 function TClusterMaster.GetResult(i:integer):TDW;
@@ -401,11 +417,11 @@ var	 														// Result<0 für Fehler, 0 für o.k.
 	newKey,nextCluster,lastID,lastInfo	:	cardinal;
 	p												:	PByte;
 	w												:	word;
-	isFull,dirty,repeater					:	boolean;
+	isFull,fullWrite,repeater					:	boolean;
 
 begin
 	try
-		result:=0; lastI:=0; lastID:=0; dirty:=false;
+		result:=0; lastI:=0; lastID:=0; fullWrite:=false; dirty:=true;
 		size:=size and $3FFF;						// size kann maximal 16383 sein
 // Daten zunächst auf drei Record-Varianten (jeweils DWords) verteilen:
 		idEl.id:=(elID shl 2) or dwIsID;		// ID-Flag setzen
@@ -486,10 +502,10 @@ begin
 				POccEl(p+i)^.clen:=0;			// Längen-DWord löschen
 				i+=4;
 				isFull:=true;						// verbleibender Platz reicht nicht aus - Platz bleibt leer => neuen Cluster anlegen (s.u.)
-				dirty:=true;						// Record muss komplett abgespeichert werden
+				fullWrite:=true;						// Record muss komplett abgespeichert werden
 			end else begin
 				if not repeater then begin
-					POccEl(p+i)^:=idEl; 			// Wort aus anderem Text: kompletten Record setzen
+					POccEl(p+i)^:=idEl; 			// Wort aus anderem Text und/oder mit anderer INFO: kompletten Record setzen
 					if occLen>8 then POccEl(p+i+4)^:=moreDatEl;
 					POccEl(p+i+occLen-4)^:=datEl;
 					i+=occLen;
@@ -516,10 +532,10 @@ begin
 		if isFull then begin
 			// Zum Platz-Optimieren siehe unten ¹)
 			if (recycling) and (nextCluster<>0) then begin	// auch in nicht-letzten Clustern soll Platz aus gelöschten Einträgen recycled werden
-				if dirty then begin					// ggf. zunächst die oben geänderten Daten (full+last flags) speichern
+				if fullWrite then begin					// ggf. zunächst die oben geänderten Daten (full+last flags) speichern
 					occStream.Seek(aktKey+cluDaLen[aktKey=key],soFromBeginning);
 					occStream.Write(p^,i);		// Records (hier ohne Header) soweit beschrieben abspeichern
-					dirty:=false;
+					fullWrite:=false;
 				end;
 				
 				while (isFull) and (nextCluster<>0) do begin
@@ -549,18 +565,18 @@ begin
 			else begin								// aktueller (occ @ aktKey) ist Fortsetzungscluster
 				occ^.next:=newKey;				// Vorwärtszeiger im Vorgänger-Cluster setzen
 				occStream.Seek(aktKey,soFromBeginning);
-				if dirty then begin
+				if fullWrite then begin
 					occStream.Write(occ^,4+i);	// Cluster komplett abspeichern (ggf. oben flags verändert) 
-					dirty:=false;
+					fullWrite:=false;
 				end else
 					occStream.Write(occ^,4);	// nur dessen "next"-Feld abspeichern 
 			end;
 
 			firstOcc^.last:=newKey;				// neuen last-Zeiger im Erstcluster setzen
 			occStream.Seek(key,soFromBeginning);
-			if dirty then begin
+			if fullWrite then begin
 				occStream.Write(firstOcc^,8+i);// Cluster komplett abspeichern (full flag s.o.)
-				dirty:=false
+				fullWrite:=false
 			end else
 				occStream.Write(firstOcc^,8);	// nur dessen "last" und "next"-Felder abspeichern
 
@@ -759,6 +775,7 @@ begin
 		on E:Exception do begin writeln(' EX=',E.message,' in occtable.InvalidateEntry'); result:=-321; end;
 		on EStreamError do result:=-309;
 	end;
+	dirty:=dirty or (n>0);
 	result:=n;
 end;
 
@@ -772,7 +789,7 @@ begin
 	occStream.Free;						// TFileStream freigeben
 	occStream:=TLargeMemoryStream.Create(0,growSize);	// als TLargeMemoryStream neu anlegen
 	with occStream as TLargeMemoryStream do LoadFromFile(myFileName); 
-	if (initSize>0) and (not ro) then with occStream as TLargeMemoryStream do SetSize(initSize); // erst hier sinnvoll, weil LoadFromFile die Capacity einstellt
+	if (initSize>occStream.Size) and (not ro) then with occStream as TLargeMemoryStream do SetSize(initSize); // erst hier sinnvoll, weil LoadFromFile die Capacity einstellt
 end;
 
 
@@ -786,7 +803,8 @@ end;
 procedure TClusterMasterM.Clear;
 begin
 	with occStream as TLargeMemoryStream do Clear;
-	occStream.WriteDWord(occLen);
+	inherited Clear;
+	dirty:=true;
 end;
 
 
@@ -795,14 +813,14 @@ var
 	store	:	TFileStream;
 	n		:	cardinal;
 begin
-	if ro or (occStream=NIL) then EXIT;
+	if ro or (not dirty) or (occStream=NIL) then EXIT;
 	occStream.Seek(0,soFromBeginning);
 	store:=TFileStream.Create(myFileName,fmCreate);
-	if occStream.Size and $FFFFFFFF < nextKey then n:=occStream.Size and $FFFFFFFF else n:=nextKey;
+	if occStream.Size < nextKey then n:=occStream.Size else n:=nextKey;
 	store.CopyFrom(occStream,n);
 	store.Free;
+	dirty:=false;
 end;
-
 
 end.
 
